@@ -1,6 +1,6 @@
 //! Various utilities for working with files and paths.
 
-use anyhow::{Context, Result};
+use color_eyre::eyre::{bail, format_err, Error, WrapErr, Result};
 use filetime::FileTime;
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -111,7 +111,7 @@ pub fn normalize_path<P: AsRef<Path>>(path: P) -> PathBuf {
 /// Returns an error if it cannot be found.
 pub fn resolve_executable<P: AsRef<Path>>(exec: P) -> Result<PathBuf> {
     if exec.as_ref().components().count() == 1 {
-        let paths = env::var_os("PATH").ok_or_else(|| anyhow::format_err!("no PATH"))?;
+        let paths = env::var_os("PATH").ok_or_else(|| format_err!("no PATH"))?;
         let candidates = env::split_paths(&paths).flat_map(|path| {
             let candidate = path.join(&exec);
             let with_exe = if env::consts::EXE_EXTENSION.is_empty() {
@@ -129,7 +129,7 @@ pub fn resolve_executable<P: AsRef<Path>>(exec: P) -> Result<PathBuf> {
             }
         }
 
-        anyhow::bail!(
+        bail!(
             "no executable for `{}` found in PATH",
             exec.as_ref().display()
         )
@@ -145,7 +145,7 @@ pub fn read<P: AsRef<Path>>(path: P) -> Result<String> {
     let path = path.as_ref();
     match String::from_utf8(read_bytes(path)?) {
         Ok(s) => Ok(s),
-        Err(_) => anyhow::bail!("path at `{}` was not valid utf-8", path.display()),
+        Err(_) => bail!("path at `{}` was not valid utf-8", path.display()),
     }
 }
 
@@ -337,7 +337,7 @@ pub fn path2bytes<P: AsRef<Path>>(path: &P) -> Result<&[u8]> {
     {
         match path.as_os_str().to_str() {
             Some(s) => Ok(s.as_bytes()),
-            None => Err(anyhow::format_err!(
+            None => Err(format_err!(
                 "invalid non-unicode path: {}",
                 path.as_ref().display()
             )),
@@ -357,7 +357,7 @@ pub fn bytes2path(bytes: &[u8]) -> Result<PathBuf> {
         use std::str;
         match str::from_utf8(bytes) {
             Ok(s) => Ok(PathBuf::from(s)),
-            Err(..) => Err(anyhow::format_err!("invalid non-unicode path")),
+            Err(..) => Err(format_err!("invalid non-unicode path")),
         }
     }
 }
@@ -655,7 +655,7 @@ pub fn create_dir_all_excluded_from_backups_atomic(p: impl AsRef<Path>) -> Resul
     // we can infer from it it's another cargo process doing work.
     if let Err(e) = fs::rename(tempdir.path(), path) {
         if !path.exists() {
-            return Err(anyhow::Error::from(e));
+            return Err(Error::from(e));
         }
     }
     Ok(())

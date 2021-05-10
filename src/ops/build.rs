@@ -1,21 +1,32 @@
-use anyhow::Context;
-use cargo_util::paths;
-use filetime::FileTime;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::Arc;
+
+use cargo_util::paths;
+use color_eyre::eyre::{bail, eyre, WrapErr};
+use color_eyre::Help;
+use filetime::FileTime;
 use tracing::{debug, info};
 
-use super::cargo;
-use super::util;
+use crate::args::BuildArgs;
+use crate::config::Config;
+use crate::{cargo, util, CIResult};
 
-use crate::args;
-use crate::CIResult;
+pub fn exec(args: BuildArgs) -> CIResult<()> {
+    let config = Config::load()?;
+    if !Path::new(&config.path).exists() {
+        return Err(eyre!("Failed to locate the Compiler Interrupts library")
+            .suggestion("Run `cargo lib-ci --install` to install the library"));
+    }
 
-pub(crate) fn run() -> CIResult<()> {
+    println!("Compiling...");
+
     let mut old_timestamp_binary_files = vec![];
 
-    if let Ok(deps_dir) = util::target_dir("deps") {
+    let args = Arc::new(args);
+
+    if let Ok(deps_dir) = util::target_dir(&args.target, &args.release, "deps") {
         let binary_files = {
             let v = util::scan_dir(&deps_dir, |_, extension| extension == None)?;
             v.into_iter()
@@ -29,9 +40,9 @@ pub(crate) fn run() -> CIResult<()> {
     }
 
     // run `cargo build`
-    let cargo_build_output = cargo::build()?;
+    let cargo_build_output = cargo::build(&args)?;
 
-    let deps_dir = util::target_dir("deps")?;
+    let deps_dir = util::target_dir(&args.target, &args.release, "deps")?;
 
     let binary_files = {
         let v = util::scan_dir(&deps_dir, |_, extension| extension == None)?;
@@ -56,9 +67,11 @@ pub(crate) fn run() -> CIResult<()> {
     };
 
     if num_newer_binary_file == 0 {
-        println!("nothing to integrate, all fresh");
+        println!("Nothing to integrate, all fresh");
         return Ok(());
     }
+
+    println!("Integrating...");
 
     // get *.ll files
     let ll_files = util::scan_dir(&deps_dir, |stem, extension| {
@@ -70,20 +83,38 @@ pub(crate) fn run() -> CIResult<()> {
     // run CI integration
     let mut handlers = vec![];
     for file in ll_files {
+        let config = config.clone();
         let handler = std::thread::spawn(move || {
             pre_ci_integration(&file)?;
-            ci_integration(&file)?;
+            ci_integration(&file, &config)?;
             post_ci_integration(&file)?;
-            Ok::<(), anyhow::Error>(())
+            Ok::<(), color_eyre::eyre::Error>(())
         });
         handlers.push(handler);
     }
     for handler in handlers {
-        handler.join().expect("couldn't join thread")?;
+        handler.join().expect("failed to join thread")?;
     }
 
     // run linker
-    linker(&cargo_build_output, num_newer_binary_file)?;
+    linker(&args, cargo_build_output, num_newer_binary_file)?;
+
+    // copy output file
+    let binary_files = {
+        let v = util::scan_dir(&deps_dir, |_, extension| extension == None)?;
+        v.into_iter()
+            .filter(|path| fs::metadata(path).unwrap().is_file())
+            .collect::<Vec<PathBuf>>()
+    };
+
+    for file in binary_files {
+        let name = file.file_name().unwrap();
+        let parent = file.parent().unwrap();
+        let path = parent.with_file_name(name);
+        util::cp(&file, &path)?;
+    }
+
+    println!("Done. Run `cargo run-ci` to run the integrated binary");
 
     Ok(())
 }
@@ -94,9 +125,9 @@ fn pre_ci_integration(file: &PathBuf) -> CIResult<Output> {
     let file_name = file
         .file_stem()
         .and_then(|s| s.to_str())
-        .context("failed to get file stem")?;
+        .ok_or_else(|| eyre!("failed to get file stem"))?;
     let out_file = file.with_file_name(format!("{}_opt.ll", file_name));
-    let default_args = vec![
+    let args = vec![
         "-S",
         "-postdomtree",
         "-mem2reg",
@@ -108,16 +139,12 @@ fn pre_ci_integration(file: &PathBuf) -> CIResult<Output> {
     .iter()
     .map(|s| s.to_string())
     .collect::<Vec<String>>();
-    let pre_ci_args = &args::get().pre_ci_args;
-    let args = match !pre_ci_args.is_empty() {
-        true => pre_ci_args,
-        false => &default_args,
-    };
+
     let output = util::opt(args, &file, &&out_file)?;
     Ok(output)
 }
 
-fn ci_integration(file: &PathBuf) -> CIResult<Output> {
+fn ci_integration(file: &PathBuf, config: &Config) -> CIResult<Output> {
     // second `opt` pass, integrate CI
     debug!("integration: {}", file.display());
 
@@ -146,7 +173,7 @@ fn ci_integration(file: &PathBuf) -> CIResult<Output> {
     let file_name = file
         .file_stem()
         .and_then(|s| s.to_str())
-        .context("failed to get file stem")?;
+        .ok_or_else(|| eyre!("failed to get file stem"))?;
 
     let in_file = file.with_file_name(format!("{}_opt.ll", file_name));
     let out_file = file.with_file_name(format!("{}_ci.ll", file_name));
@@ -155,19 +182,7 @@ fn ci_integration(file: &PathBuf) -> CIResult<Output> {
     let file_name = file_name.split(".").collect::<Vec<&str>>()[0].to_string();
 
     // skip "compiler-interrupt" crate
-    let mut skip_crates = vec!["compiler_interrupt"];
-
-    // crates that take an enormous amount of time to integrate
-    skip_crates.append(&mut vec![
-        "syn",
-        "regex",
-        "serde",
-        "derive",
-        "toml",
-        "proc",
-        "clap",
-        "structopt",
-    ]);
+    let skip_crates = vec!["compiler_interrupt"];
 
     if skip_crates.iter().any(|skip| file_name.contains(skip)) {
         // make a dummy _ci.ll file
@@ -181,46 +196,14 @@ fn ci_integration(file: &PathBuf) -> CIResult<Output> {
         false => "-defclock=0",
     };
 
-    let args = args::get();
+    let mut args = ["-S", "-load", &config.path, "-logicalclock", def_clock]
+        .iter()
+        .map(|s| s.to_string())
+        .collect::<Vec<String>>();
 
-    let ci_library_path = format!(
-        "{}/lib/libcompilerinterrupt.so",
-        std::env::var("CARGO_HOME").unwrap()
-    );
+    args.extend(config.args.clone());
 
-    if !PathBuf::from(&ci_library_path).exists() {
-        anyhow::bail!(
-            "failed to locate `libcompilerinterrupt`, please reinstall `cargo-ci` \
-            or manually specify the path to the library through --lib-path"
-        );
-    }
-
-    let default_args = [
-        "-S",
-        "-load",
-        &ci_library_path,
-        "-compilerinterrupt",
-        def_clock,
-        "-clock-type=1",
-        "-config=2",
-        "-inst-gran=2",
-        "-all-dev=100",
-        "-push-intv=5000",
-        "-commit-intv=1000",
-        "-mem-ops-cost=1",
-        "-fiber-config=5",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect::<Vec<String>>();
-
-    let ci_args = &args.ci_args;
-    let args = match !ci_args.is_empty() {
-        true => ci_args,
-        false => &default_args,
-    };
-
-    let output = util::opt(args, &in_file, &out_file)?;
+    let output = util::opt(&args, &in_file, &out_file)?;
     Ok(output)
 }
 
@@ -229,7 +212,7 @@ fn post_ci_integration(file: &PathBuf) -> CIResult<()> {
     let file_name = file
         .file_stem()
         .and_then(|s| s.to_str())
-        .context("failed to get file stem")?;
+        .ok_or_else(|| eyre!("failed to get file stem"))?;
     let opt_file = file.with_file_name(format!("{}_opt.ll", file_name));
     let ci_file = file.with_file_name(format!("{}_ci.ll", file_name));
 
@@ -238,12 +221,16 @@ fn post_ci_integration(file: &PathBuf) -> CIResult<()> {
 
     // clean *_opt.ll
     fs::remove_file(opt_file.clone())
-        .context(format!("failed to remove file: {}", opt_file.display()))?;
+        .wrap_err(format!("failed to remove file: {}", opt_file.display()))?;
 
     Ok(())
 }
 
-fn linker(cargo_build_output: &Output, num_newer_binary_file: usize) -> CIResult<()> {
+fn linker(
+    args: &BuildArgs,
+    cargo_build_output: Output,
+    num_newer_binary_file: usize,
+) -> CIResult<()> {
     // parse output from `cargo build` to get the final `cc` linker command
     debug!("running linker");
     let stdout = String::from_utf8_lossy(&cargo_build_output.stdout);
@@ -263,9 +250,7 @@ fn linker(cargo_build_output: &Output, num_newer_binary_file: usize) -> CIResult
             .filter(|e| e.contains(".o") && !e.contains("_ci"));
         for file in object_files {
             // find the object file that contains the symbol for rust memory allocator
-            // the reason for this is `rustc` is doing some hidden magic behind us
-            // it uses llvm's code generation to create an allocator shim for the standalone binary
-            // that object file doesn't get CI-integrated so we will have to find it for later use
+            // it doesn't get CI-integrated so we will have to find it for later use
             // we also need to invoke `rustc` with `-C save-temps` flags to not to delete the
             // temporary object file that contain allocator symbols
 
@@ -277,7 +262,7 @@ fn linker(cargo_build_output: &Output, num_newer_binary_file: usize) -> CIResult
                 info!("status code: {:?}", output.status);
                 info!("stdout: {}", String::from_utf8_lossy(&output.stdout));
                 info!("stderr: {}", String::from_utf8_lossy(&output.stderr));
-                anyhow::bail!("`nm` returned failed status code");
+                bail!("`nm` returned failed status code");
             }
             let stdout = String::from_utf8_lossy(&output.stdout);
             if !stdout.contains("___rust_alloc") {
@@ -286,7 +271,7 @@ fn linker(cargo_build_output: &Output, num_newer_binary_file: usize) -> CIResult
                 let file_name = file_name
                     .file_stem()
                     .and_then(|s| s.to_str())
-                    .context("failed to get file stem")?;
+                    .ok_or_else(|| eyre!("failed to get file stem"))?;
                 ci_file.set_file_name(format!("{}_ci.o", file_name));
                 *file = ci_file.into_os_string().into_string().unwrap();
             }
@@ -297,7 +282,7 @@ fn linker(cargo_build_output: &Output, num_newer_binary_file: usize) -> CIResult
             .filter(|e| e.contains("deps") && e.contains(".rlib"));
         for file in deps_rlib_files {
             debug!("replacing object file: {}", file);
-            replace_obj_file(file)?;
+            replace_obj_file(args, file)?;
         }
 
         // execute
@@ -308,17 +293,17 @@ fn linker(cargo_build_output: &Output, num_newer_binary_file: usize) -> CIResult
             cmd.arg(arg);
         }
 
-        let output = cmd.output().context("failed to execute `cc`")?;
+        let output = cmd.output().wrap_err("failed to execute `cc`")?;
 
         if !output.status.success() {
             info!("status code: {:?}", output.status);
             info!("stdout: {}", String::from_utf8_lossy(&output.stdout));
             info!("stderr: {}", String::from_utf8_lossy(&output.stderr));
-            anyhow::bail!("`cc` returned failed status code");
+            bail!("`cc` returned failed status code");
         }
     }
 
-    let deps_dir = util::target_dir("deps")?;
+    let deps_dir = util::target_dir(&args.target, &args.release, "deps")?;
 
     // clean up rcgu.* files
     // debug!("cleaning up rcgu.* files");
@@ -346,7 +331,7 @@ fn linker(cargo_build_output: &Output, num_newer_binary_file: usize) -> CIResult
     Ok(())
 }
 
-fn replace_obj_file(rlib_file: &String) -> CIResult<()> {
+fn replace_obj_file(args: &BuildArgs, rlib_file: &String) -> CIResult<()> {
     // replace *.o with *_ci.o in rlib files
 
     // list all obj files
@@ -355,7 +340,7 @@ fn replace_obj_file(rlib_file: &String) -> CIResult<()> {
         info!("status code: {:?}", output.status);
         info!("stdout: {}", String::from_utf8_lossy(&output.stdout));
         info!("stderr: {}", String::from_utf8_lossy(&output.stderr));
-        anyhow::bail!("`ar` returned failed status code");
+        bail!("`ar` returned failed status code");
     }
 
     let rcgu_obj_file = String::from_utf8_lossy(&output.stdout);
@@ -367,12 +352,12 @@ fn replace_obj_file(rlib_file: &String) -> CIResult<()> {
         None => return Ok(()),
     };
 
-    let mut deps_dir = util::target_dir("deps")?;
+    let mut deps_dir = util::target_dir(&args.target, &args.release, "deps")?;
     deps_dir.push(rcgu_obj_file);
     let rcgu_obj_file_name = deps_dir
         .file_stem()
         .and_then(|s| s.to_str())
-        .context("failed to get file stem")?;
+        .ok_or_else(|| eyre!("failed to get file stem"))?;
     let mut rcgu_obj_ci_file = deps_dir.clone();
     rcgu_obj_ci_file.set_file_name(format!("{}_ci.o", rcgu_obj_file_name));
 
@@ -387,7 +372,7 @@ fn replace_obj_file(rlib_file: &String) -> CIResult<()> {
         info!("status code: {:?}", output.status);
         info!("stdout: {}", String::from_utf8_lossy(&output.stdout));
         info!("stderr: {}", String::from_utf8_lossy(&output.stderr));
-        anyhow::bail!("`ar` returned failed status code");
+        bail!("`ar` returned failed status code");
     }
 
     // delete old rcgu_obj_file
@@ -400,7 +385,7 @@ fn replace_obj_file(rlib_file: &String) -> CIResult<()> {
         info!("status code: {:?}", output.status);
         info!("stdout: {}", String::from_utf8_lossy(&output.stdout));
         info!("stderr: {}", String::from_utf8_lossy(&output.stderr));
-        anyhow::bail!("`ar` returned failed status code");
+        bail!("`ar` returned failed status code");
     }
 
     Ok(())

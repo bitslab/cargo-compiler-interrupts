@@ -1,23 +1,23 @@
-use anyhow::Context;
+use std::process::Output;
+
 use cargo_metadata::{Metadata, MetadataCommand};
 use cargo_util::ProcessBuilder;
-use std::process::Output;
+use color_eyre::eyre::WrapErr;
 use tracing::{debug, info};
 
-use crate::args;
+use crate::args::BuildArgs;
 use crate::CIResult;
 
 /// Run `cargo build`.
-pub(crate) fn build() -> CIResult<Output> {
+pub fn build(args: &BuildArgs) -> CIResult<Output> {
     info!("running cargo build");
-    let args = args::get();
 
     let mut cmd = ProcessBuilder::new("cargo");
     cmd.arg("build");
     cmd.arg("-vv");
 
-    // build mode
-    if args.build_mode == "release" {
+    // release mode
+    if args.release {
         cmd.arg("--release");
     }
 
@@ -35,9 +35,9 @@ pub(crate) fn build() -> CIResult<Output> {
     // RUSTFLAGS
     let rustflags = std::env::var("RUSTFLAGS").unwrap_or_default();
 
-    // is this going to override custom rustc flags from .cargo/config.toml?
+    // TODO: respect RUSTFLAGS from .cargo/config.toml
     // `--emit=llvm-ir` to emit LLVM IR bitcode
-    // `-C debuginfo=0` to not pollute IR with debug symbols
+    // `-C debuginfo=0` to not pollute the bitcode with debug symbols
     // `-C save-temps` to save temporary files during the compilation
     // `-Z print-link-args` to print the internal linker command
     let extra_rustflags = "--emit=llvm-ir -C debuginfo=0 -C save-temps -Z print-link-args";
@@ -49,7 +49,7 @@ pub(crate) fn build() -> CIResult<Output> {
 }
 
 /// Run `cargo clean`.
-pub(crate) fn clean() -> CIResult<Output> {
+pub fn clean() -> CIResult<Output> {
     info!("running cargo clean");
     let mut cmd = ProcessBuilder::new("cargo");
     cmd.arg("clean");
@@ -58,11 +58,11 @@ pub(crate) fn clean() -> CIResult<Output> {
 }
 
 /// Run `cargo metadata`.
-pub(crate) fn metadata() -> CIResult<Metadata> {
+pub fn metadata() -> CIResult<Metadata> {
     info!("running cargo metadata");
     let mut cmd = MetadataCommand::new();
     cmd.no_deps();
-    let metadata = cmd.exec().context("failed to execute `cargo metadata`")?;
+    let metadata = cmd.exec().wrap_err("failed to execute `cargo metadata`")?;
 
     Ok(metadata)
 }

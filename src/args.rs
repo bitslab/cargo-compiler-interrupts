@@ -1,49 +1,86 @@
-use clap::Clap;
-use std::sync::{RwLock, RwLockReadGuard};
-
-lazy_static::lazy_static! {
-    static ref ARGS: RwLock<Args> = RwLock::new(Args::parse());
-}
+use clap::{ArgGroup, Clap};
 
 #[derive(Clap, Debug)]
 #[clap(
-    name = clap::crate_name!(),
+    name = format!("cargo-{}", crate::BUILD_CI),
     version = clap::crate_version!(),
     author = clap::crate_authors!(),
-    about = clap::crate_description!(),
+    about = "Compile and integrate the Compiler Interrupts to a local package",
 )]
-pub struct Args {
-    /// Build artifacts mode
-    #[clap(
-        long,
-        value_name = "MODE",
-        default_value = "debug",
-        possible_values = &["debug", "release"],
-        hide_default_value = true
-    )]
-    pub build_mode: String,
+pub struct BuildArgs {
+    /// Build artifacts in release mode
+    #[clap(short, long)]
+    pub release: bool,
 
     /// Build for the target triple
-    #[clap(long, value_name = "TRIPLE")]
+    #[clap(short, long, value_name = "TRIPLE")]
     pub target: Option<String>,
-
-    /// Specify the path for the Compiler Interrupt library
-    #[clap(long)]
-    pub lib_path: Option<String>,
-
-    /// Specify the arguments for the pre-CI integration `opt` instance
-    #[clap(long)]
-    pub pre_ci_args: Vec<String>,
-
-    /// Specify the arguments for the CI integration `opt` instance
-    #[clap(long)]
-    pub ci_args: Vec<String>,
 
     /// Use verbose output (-vv very verbose output)
     #[clap(short, long, parse(from_occurrences))]
     pub verbose: i32,
 }
 
-pub(crate) fn get() -> RwLockReadGuard<'static, Args> {
-    ARGS.read().unwrap()
+#[derive(Clap, Debug)]
+#[clap(
+    name = format!("cargo-{}", crate::RUN_CI),
+    version = clap::crate_version!(),
+    author = clap::crate_authors!(),
+    about = "Run a Compiler Interrupts-integrated binary",
+)]
+pub struct RunArgs {
+    /// Run the binary in release mode
+    #[clap(short, long)]
+    pub release: bool,
+
+    /// Run for the target triple
+    #[clap(short, long, value_name = "TRIPLE")]
+    pub target: Option<String>,
+
+    /// Name of the binary
+    #[clap(short, long)]
+    pub bin: Option<String>,
+
+    /// Use verbose output (-vv very verbose output)
+    #[clap(short, long, parse(from_occurrences))]
+    pub verbose: i32,
+}
+
+#[derive(Clap, Debug)]
+#[clap(
+    name = format!("cargo-{}", crate::LIB_CI),
+    version = clap::crate_version!(),
+    author = clap::crate_authors!(),
+    about = "Manage the Compiler Interrupts library",
+    group = ArgGroup::new("lib").required(true),
+)]
+pub struct LibraryArgs {
+    /// Install the library
+    #[clap(short, long, group = "lib")]
+    pub install: bool,
+
+    /// Uninstall the library
+    #[clap(short, long, group = "lib")]
+    pub uninstall: bool,
+
+    /// Set default arguments for the library
+    #[clap(short, long, requires = "lib", default_values = &[
+        "-clock-type=1",
+        "-config=2",
+        "-inst-gran=2",
+        "-all-dev=100",
+        "-push-intv=5000",
+        "-commit-intv=1000",
+        "-mem-ops-cost=1",
+        "-fiber-config=5"
+    ])]
+    pub args: Vec<String>,
+
+    /// Path to the library when installing
+    #[clap(short, long, requires = "lib")]
+    pub path: Option<String>,
+
+    /// Use verbose output (-vv very verbose output)
+    #[clap(short, long, parse(from_occurrences))]
+    pub verbose: i32,
 }
