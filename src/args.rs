@@ -1,4 +1,4 @@
-use clap::{ArgGroup, Clap};
+use clap::Clap;
 
 #[derive(Clap, Debug)]
 #[clap(
@@ -33,12 +33,12 @@ pub struct RunArgs {
     #[clap(short, long)]
     pub release: bool,
 
-    /// Run for the target triple
+    /// Target triple for the binary
     #[clap(short, long, value_name = "TRIPLE")]
     pub target: Option<String>,
 
     /// Name of the binary
-    #[clap(short, long)]
+    #[clap(short, long, value_name = "BINARY_NAME")]
     pub bin: Option<String>,
 
     /// Use verbose output (-vv very verbose output)
@@ -51,33 +51,23 @@ pub struct RunArgs {
     name = format!("cargo-{}", crate::LIB_CI),
     version = clap::crate_version!(),
     author = clap::crate_authors!(),
-    about = "Manage the Compiler Interrupts library",
-    group = ArgGroup::new("lib").required(true),
+    about = "Manage the Compiler Interrupts library"
 )]
 pub struct LibraryArgs {
     /// Install the library
-    #[clap(short, long, group = "lib")]
+    #[clap(short, long, takes_value = false)]
     pub install: bool,
 
     /// Uninstall the library
-    #[clap(short, long, group = "lib")]
+    #[clap(short, long, takes_value = false)]
     pub uninstall: bool,
 
     /// Set default arguments for the library
-    #[clap(short, long, requires = "lib", default_values = &[
-        "-clock-type=1",
-        "-config=2",
-        "-inst-gran=2",
-        "-all-dev=100",
-        "-push-intv=5000",
-        "-commit-intv=1000",
-        "-mem-ops-cost=1",
-        "-fiber-config=5"
-    ])]
-    pub args: Vec<String>,
+    #[clap(short, long, allow_hyphen_values = true)]
+    pub args: Option<Vec<String>>,
 
     /// Path to the library when installing
-    #[clap(short, long, requires = "lib")]
+    #[clap(short, long, requires = "install")]
     pub path: Option<String>,
 
     /// Use verbose output (-vv very verbose output)

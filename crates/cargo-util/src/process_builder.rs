@@ -1,6 +1,6 @@
 use crate::process_error::ProcessError;
 use crate::read2;
-use color_eyre::eyre::{bail, WrapErr, Error, Result};
+use anyhow::{bail, Error, Result, Context};
 // use jobserver::Client;
 use shell_escape::escape;
 use std::collections::BTreeMap;
@@ -315,7 +315,7 @@ impl ProcessBuilder {
                     Some(output.status),
                     to_print,
                 );
-                bail!(Error::new(cx).wrap_err(e));
+                bail!(Error::new(cx).context(e));
             } else if !output.status.success() {
                 bail!(ProcessError::new(
                     &format!("process didn't exit successfully: {}", self),
@@ -389,14 +389,14 @@ impl ProcessBuilder {
 #[cfg(unix)]
 mod imp {
     use super::{ProcessBuilder, ProcessError};
-    use color_eyre::eyre::{Result, Error};
+    use anyhow::{Error, Result};
     use std::os::unix::process::CommandExt;
 
     pub fn exec_replace(process_builder: &ProcessBuilder) -> Result<()> {
         let mut command = process_builder.build_command();
         let error = command.exec();
 
-        Err(Error::from(error).wrap_err(ProcessError::new(
+        Err(Error::from(error).context(ProcessError::new(
             &format!("could not execute process {}", process_builder),
             None,
             None,
@@ -407,7 +407,7 @@ mod imp {
 #[cfg(windows)]
 mod imp {
     use super::{ProcessBuilder, ProcessError};
-    use color_eyre::eyre::Result;
+    use anyhow::Result;
     use winapi::shared::minwindef::{BOOL, DWORD, FALSE, TRUE};
     use winapi::um::consoleapi::SetConsoleCtrlHandler;
 

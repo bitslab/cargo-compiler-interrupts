@@ -9,8 +9,7 @@ repository = "https://github.com/rust-lang/cargo"
 version = "0.1.0"
 
 [dependencies]
-# anyhow = "1.0"
-color-eyre = "0.5"
+anyhow = "1.0"
 # crypto-hash = "0.3"
 filetime = "0.2"
 # hex = "0.4"

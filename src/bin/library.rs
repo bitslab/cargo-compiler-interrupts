@@ -1,10 +1,8 @@
-use cargo_ci::{args, ops, util, CIResult};
+use cargo_ci::{args, config, ops, util, CIResult};
 use clap::Clap;
 
 fn main() -> CIResult<()> {
-    color_eyre::config::HookBuilder::default()
-        .panic_section("Please report the bug at https://github.com/bitslab/cargo-ci")
-        .install()?;
+    let config = config::Config::load()?;
 
     let dargs = util::drop_name_args(cargo_ci::LIB_CI);
 
@@ -12,9 +10,9 @@ fn main() -> CIResult<()> {
 
     util::init_logger(args.verbose);
 
-    util::set_current_dir_root()?;
+    util::set_current_package_root_dir()?;
 
-    ops::library::exec(args)?;
+    ops::library::exec(config, args)?;
 
     Ok(())
 }

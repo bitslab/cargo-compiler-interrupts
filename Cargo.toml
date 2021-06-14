@@ -11,17 +11,17 @@ license = "MIT"
 name = "cargo-ci"
 readme = "README.md"
 repository = "https://github.com/bitslab/cargo-ci"
-version = "2.0.0"
+version = "2.1.0"
 
 [dependencies]
+anyhow = "1.0"
 cargo-util = {path = "crates/cargo-util"}
 cargo_metadata = "0.13"
 clap = "3.0.0-beta.2"
-color-eyre = "0.5"
 dirs = "3.0"
 faccess = "0.2"
-filetime = "0.2"
 serde = {version = "1.0", features = ["derive"]}
+thiserror = "1.0"
 toml = "0.5"
 tracing = "0.1"
 tracing-subscriber = "0.2"

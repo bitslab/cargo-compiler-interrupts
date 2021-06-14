@@ -1,10 +1,7 @@
-use std::ffi::OsStr;
-use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
 
+use anyhow::Context;
 use cargo_util::{paths, ProcessBuilder};
-use color_eyre::eyre::{bail, eyre, WrapErr};
 use tracing::{debug, info};
 
 use crate::CIResult;
@@ -28,7 +25,7 @@ pub fn init_logger(verbose: i32) {
     let log_level = match verbose {
         0 => tracing::Level::ERROR,
         1 => tracing::Level::INFO,
-        2 | _ => tracing::Level::DEBUG,
+        _ => tracing::Level::DEBUG,
     };
     tracing_subscriber::fmt()
         .with_target(false)
@@ -38,206 +35,197 @@ pub fn init_logger(verbose: i32) {
         .init();
 }
 
-/// Get the directory to the target folder, concatenate with the given path.
-pub fn target_dir<P>(target: &Option<String>, release: &bool, path: P) -> CIResult<PathBuf>
-where
-    P: AsRef<Path>,
-{
-    let build_mode = if *release { "release" } else { "debug" };
-    let path = path.as_ref();
+/// Get the root directory of the package.
+fn package_root_dir() -> CIResult<PathBuf> {
+    let output = ProcessBuilder::new("cargo")
+        .arg("locate-project")
+        .arg("--message-format=plain")
+        .exec_with_output()?;
+    let stdout = String::from_utf8(output.stdout)?;
+    let path_toml = Path::new(&stdout);
+    let root_dir = path_toml.parent().context("failed to get parent dir")?;
 
-    // get base target directory
-    let mut target_dir = match std::env::var_os("CARGO_TARGET_DIR") {
-        Some(dir) => dir.into(),
-        None => std::env::current_dir()
-            .wrap_err("failed to get current directory")?
-            .join("target"),
-    };
-
-    // concatenate target if needed
-    if let Some(target) = target {
-        target_dir.push(target);
-    }
-
-    // concatenate compilation mode
-    target_dir.push(build_mode);
-
-    target_dir.push(path);
-
-    if !target_dir.exists() {
-        bail!("target directory does not exist: {}", target_dir.display());
-    }
-
-    debug!("target directory: {}", target_dir.display());
-    Ok(target_dir)
-}
-
-/// Run `opt` with given arguments, input file and output file.
-pub fn opt<P, I, S>(opt_args: I, stdin_path: P, stdout_path: P) -> CIResult<Output>
-where
-    P: AsRef<Path>,
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
-    let stdin_path = stdin_path.as_ref();
-    let stdout_path = stdout_path.as_ref();
-
-    info!(
-        "running opt: {}, {}",
-        stdin_path
-            .file_name()
-            .ok_or_else(|| eyre!("failed to get file name"))?
-            .to_string_lossy(),
-        stdout_path
-            .file_name()
-            .ok_or_else(|| eyre!("failed to get file name"))?
-            .to_string_lossy()
-    );
-
-    let mut cmd = Command::new("opt");
-    cmd.args(opt_args);
-
-    // stdin
-    let stdin = fs::File::open(stdin_path)?;
-    cmd.stdin(Into::<Stdio>::into(stdin));
-
-    // stdout
-    let stdout = fs::File::create(stdout_path)?;
-    cmd.stdout(Into::<Stdio>::into(stdout));
-
-    // execute
-    let output = cmd.output().wrap_err("failed to execute `opt`")?;
-
-    if !output.status.success() {
-        info!("status code: {:?}", output.status);
-        info!("stdout: {}", String::from_utf8_lossy(&output.stdout));
-        info!("stderr: {}", String::from_utf8_lossy(&output.stderr));
-        bail!("`opt` returned failed status code");
-    }
-
-    Ok(output)
-}
-
-/// Run `llc` with input file.
-pub fn llc<P>(input_file: P) -> CIResult<Output>
-where
-    P: AsRef<Path>,
-{
-    let input_file = input_file.as_ref();
-
-    info!(
-        "running llc: {}",
-        input_file
-            .file_name()
-            .ok_or_else(|| eyre!("failed to get file name"))?
-            .to_string_lossy()
-    );
-
-    let mut cmd = Command::new("llc");
-    cmd.arg("-filetype=obj");
-    cmd.arg(input_file);
-
-    // execute
-    let output = cmd.output().wrap_err("failed to execute `llc`")?;
-
-    if !output.status.success() {
-        info!("status code: {:?}", output.status);
-        info!("stdout: {}", String::from_utf8_lossy(&output.stdout));
-        info!("stderr: {}", String::from_utf8_lossy(&output.stderr));
-        bail!("`llc` returned failed status code");
-    }
-
-    Ok(output)
-}
-
-/// Run `cp` with source path and destination path.
-pub fn cp<P>(src_path: P, dst_path: P) -> CIResult<Output>
-where
-    P: AsRef<Path>,
-{
-    let src_path = src_path.as_ref();
-    let dst_path = dst_path.as_ref();
-
-    info!(
-        "running cp: {}, {}",
-        src_path
-            .file_name()
-            .ok_or_else(|| eyre!("failed to get file name"))?
-            .to_string_lossy(),
-        dst_path
-            .file_name()
-            .ok_or_else(|| eyre!("failed to get file name"))?
-            .to_string_lossy()
-    );
-
-    let mut cmd = Command::new("cp");
-    cmd.arg(src_path);
-    cmd.arg(dst_path);
-
-    // execute
-    let output = cmd.output().wrap_err("failed to execute `cp`")?;
-
-    if !output.status.success() {
-        info!("status code: {:?}", output.status);
-        info!("stdout: {}", String::from_utf8_lossy(&output.stdout));
-        info!("stderr: {}", String::from_utf8_lossy(&output.stderr));
-        bail!("`cp` returned failed status code");
-    }
-
-    Ok(output)
-}
-
-/// Scan the target directory for files matching the predicate.
-pub fn scan_dir<Pa, Pr>(directory: Pa, predicate: Pr) -> CIResult<Vec<PathBuf>>
-where
-    Pa: AsRef<Path>,
-    Pr: Fn(Option<&str>, Option<&str>) -> bool,
-{
-    let directory = directory.as_ref();
-    debug!("scanning directory: {}", directory.display());
-    let mut files = vec![];
-    for entry in directory.read_dir()? {
-        let entry = entry?;
-        let path = entry.path();
-        let file_stem = path.file_stem().and_then(|s| s.to_str());
-        let extension = path.extension().and_then(|s| s.to_str());
-
-        if predicate(file_stem, extension) {
-            debug!("found path: {}", path.display());
-            files.push(path);
-        }
-    }
-    Ok(files)
+    Ok(root_dir.to_path_buf())
 }
 
 /// Set the current directory to the root directory of the package.
-pub fn set_current_dir_root() -> CIResult<()> {
+pub fn set_current_package_root_dir() -> CIResult<()> {
     let mut dir = std::env::current_dir()?;
     dir.push("Cargo.toml");
 
-    if !dir.exists() {
+    if !dir.is_file() {
         info!("not running on the root directory of the package");
-        let output = ProcessBuilder::new("cargo")
-            .arg("locate-project")
-            .arg("--message-format=plain")
-            .exec_with_output()
-            .wrap_err("failed to execute cargo locate-project")?;
-        let stdout = String::from_utf8(output.stdout)?;
-        let path_toml = Path::new(&stdout);
-        let root_dir = path_toml.parent().unwrap();
-        std::env::set_current_dir(root_dir)?;
+        let root_dir = package_root_dir()?;
+        std::env::set_current_dir(&root_dir)?;
         info!("set current directory: {}", root_dir.display());
     }
 
     Ok(())
 }
 
-/// Get the configuration path.
+/// Get the path to the configuration directory.
 pub fn config_path() -> CIResult<PathBuf> {
-    let mut path = dirs::config_dir().ok_or_else(|| eyre!("failed to get config dir"))?;
+    let mut path = dirs::config_dir().context("failed to get config dir")?;
     path.push("cargo-ci");
     if !path.exists() {
         paths::create_dir_all(&path)?;
     }
     Ok(path)
+}
+
+/// Get the directory to the target folder and concatenate with the given path.
+pub fn target_dir(target: &Option<String>, release: &bool) -> CIResult<PathBuf> {
+    // get base target directory
+    let mut dir = match std::env::var_os("CARGO_TARGET_DIR") {
+        Some(dir) => dir.into(),
+        None => package_root_dir()?.join("target"),
+    };
+
+    if let Some(target) = target {
+        dir.push(target);
+    }
+
+    let build_mode = if *release { "release" } else { "debug" };
+    dir.push(build_mode);
+
+    debug!("target directory: {}", dir.display());
+    Ok(dir)
+}
+
+/// Scan the target directory for files matching the predicate.
+pub fn scan_dir<P: AsRef<Path>>(
+    directory: P,
+    predicate: fn(PathBuf) -> bool,
+) -> CIResult<Vec<PathBuf>> {
+    let directory = directory.as_ref();
+    debug!("scanning directory: {}", directory.display());
+    let mut files = vec![];
+    for entry in directory.read_dir()? {
+        let entry = entry?;
+        let path = entry.path();
+        if predicate(path.clone()) {
+            files.push(path);
+        }
+    }
+    Ok(files)
+}
+
+/// Append the suffix to the file stem of a path.
+pub fn append_suffix<P: AsRef<Path>>(path: P, suffix: &str) -> PathBuf {
+    let path = path.as_ref();
+    let file_stem = file_stem_unwrapped(path);
+    let extension = extension(path);
+    let file_name = match extension {
+        Some(extension) => format!("{}-{}.{}", file_stem, suffix, extension),
+        None => format!("{}-{}", file_stem, suffix),
+    };
+    path.with_file_name(file_name)
+}
+
+/// Get the file stem of a path.
+fn file_stem<P: AsRef<Path>>(path: P) -> Option<String> {
+    let path = path.as_ref();
+    path.file_stem()
+        .map(std::ffi::OsStr::to_string_lossy)
+        .map(|e| e.to_string())
+}
+
+/// Get the file stem of a path and automatically unwrapped.
+pub fn file_stem_unwrapped<P: AsRef<Path>>(path: P) -> String {
+    file_stem(path).unwrap_or_default()
+}
+
+/// Get the file name of a path.
+fn file_name<P: AsRef<Path>>(path: P) -> Option<String> {
+    let path = path.as_ref();
+    path.file_name()
+        .map(std::ffi::OsStr::to_string_lossy)
+        .map(|e| e.to_string())
+}
+
+/// Get the file name of a path and automatically unwrapped.
+pub fn file_name_unwrapped<P: AsRef<Path>>(path: P) -> String {
+    file_name(path).unwrap_or_default()
+}
+
+/// Get the file extension of a path.
+fn extension<P: AsRef<Path>>(path: P) -> Option<String> {
+    let path = path.as_ref();
+    path.extension()
+        .map(std::ffi::OsStr::to_string_lossy)
+        .map(|e| e.to_string())
+}
+
+/// Get the file extension of a path and automatically unwrapped.
+pub fn extension_unwrapped<P: AsRef<Path>>(path: P) -> String {
+    extension(path).unwrap_or_default()
+}
+
+/// Sanity check for LLVM toolchain and its binaries. Not the prettiest implementation.
+pub fn llvm_toolchain(binaries: &mut Vec<String>) -> CIResult<String> {
+    use crate::error::CIError::*;
+    use anyhow::bail;
+
+    // get rustc's llvm version
+    let output = ProcessBuilder::new("rustc").arg("-vV").exec_with_output()?;
+    let rustc_output = String::from_utf8(output.stdout)?;
+    let rustc_ver = rustc_output
+        .lines()
+        .filter_map(|line| line.strip_prefix("LLVM version: "))
+        .next()
+        .expect("`rustc -vV` should have the LLVM version field")
+        .trim()
+        .to_string();
+    let major_ver = rustc_ver.split(".").next().unwrap();
+
+    // get llvm version
+    let cfg = ProcessBuilder::new("llvm-config")
+        .arg("--version")
+        .exec_with_output();
+    let cfg_sf = ProcessBuilder::new(format!("llvm-config-{}", major_ver))
+        .arg("--version")
+        .exec_with_output();
+
+    // check if rustc and llvm are compatible
+    let add_sf = match (cfg, cfg_sf) {
+        (Ok(o), Ok(o_sf)) => {
+            let ver = String::from_utf8(o.stdout)?.trim().to_string();
+            let ver_sf = String::from_utf8(o_sf.stdout)?.trim().to_string();
+            if rustc_ver == ver {
+                false
+            } else if rustc_ver == ver_sf {
+                true
+            } else {
+                bail!(LLVMVersionNotMatch(rustc_ver, ver_sf));
+            }
+        }
+        (Ok(o), Err(_)) => {
+            let ver = String::from_utf8(o.stdout)?.trim().to_string();
+            if rustc_ver != ver {
+                bail!(LLVMVersionNotMatch(rustc_ver, ver));
+            }
+            false
+        }
+        (Err(_), Ok(o_sf)) => {
+            let ver_sf = String::from_utf8(o_sf.stdout)?.trim().to_string();
+            if rustc_ver != ver_sf {
+                bail!(LLVMVersionNotMatch(rustc_ver, ver_sf));
+            }
+            true
+        }
+        (Err(_), Err(_)) => {
+            bail!(LLVMNotInstalled);
+        }
+    };
+
+    // add version suffix if needed
+    for binary in binaries {
+        *binary = if add_sf {
+            format!("{}-{}", binary, major_ver)
+        } else {
+            binary.to_string()
+        }
+    }
+
+    Ok(rustc_ver)
 }

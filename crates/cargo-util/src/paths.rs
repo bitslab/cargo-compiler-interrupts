@@ -1,6 +1,6 @@
 //! Various utilities for working with files and paths.
 
-use color_eyre::eyre::{bail, format_err, Error, WrapErr, Result};
+use anyhow::{bail, format_err, Error, Context, Result};
 use filetime::FileTime;
 use std::env;
 use std::ffi::{OsStr, OsString};
