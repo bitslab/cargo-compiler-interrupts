@@ -146,7 +146,7 @@ pub fn exec(config: Config, args: BuildArgs) -> CIResult<()> {
 
                 // `opt` runs the integration
                 ProcessBuilder::new(&llvm_bins[0])
-                    .args(args)
+                    .args(&args)
                     .arg(&file)
                     .arg("-o")
                     .arg(&ci_file)

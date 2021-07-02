@@ -4,17 +4,27 @@ All notable changes to this project will be documented in this file. `cargo-comp
 
 #### 3.x Releases
 
-- `3.0.x` Releases - [3.0.0](#300)
+- `3.0.x` Releases - [3.0.0](#300) | [3.0.1](#301)
 
 #### 2.x Releases
 
-- `2.0.x` Releases - [2.0.0](#200) | [2.1.0](#210)
+- `2.1.x` Releases - [2.1.0](#210)
+- `2.0.x` Releases - [2.0.0](#200)
 
 #### 1.x Releases
 
 - `1.0.x` Releases - [1.0.0](#100)
 
 ---
+
+## [3.0.1](https://github.com/bitslab/cargo-compiler-interrupts/releases/tag/3.0.1)
+
+Released on 2021-07-02.
+
+#### Updated
+
+- Fix the compilation error while running `cargo publish`.
+- Version number should now be correct.
 
 ## [3.0.0](https://github.com/bitslab/cargo-compiler-interrupts/releases/tag/3.0.0)
 

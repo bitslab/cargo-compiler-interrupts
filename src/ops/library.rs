@@ -99,10 +99,10 @@ fn install(mut config: Config, args: LibraryArgs) -> CIResult<()> {
     let mut clang = ProcessBuilder::new(&llvm_bins[1]);
     clang.arg(src_path);
     clang.args(&["-o".to_string(), lib_path.to_string()]);
-    clang.args(so_flags.split_ascii_whitespace());
-    clang.args(cxx_flags.split_ascii_whitespace());
-    clang.args(ld_flags.split_ascii_whitespace());
-    clang.args(common_flags.split_ascii_whitespace());
+    clang.args(&so_flags.split_ascii_whitespace().collect::<Vec<_>>());
+    clang.args(&cxx_flags.split_ascii_whitespace().collect::<Vec<_>>());
+    clang.args(&ld_flags.split_ascii_whitespace().collect::<Vec<_>>());
+    clang.args(&common_flags.split_ascii_whitespace().collect::<Vec<_>>());
     info!("clang args: {:?}", clang.get_args());
 
     clang.exec().context("failed to compile the library")?;
