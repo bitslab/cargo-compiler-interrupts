@@ -38,9 +38,12 @@ fn install(mut config: Config, args: LibraryArgs) -> CIResult<()> {
 
     info!("getting the destination library path");
     let lib_path = {
-        if let Some(path) = args.path {
-            // user-provided path
-            let mut path = PathBuf::from(&path);
+        if let Some(apath) = args.path {
+            // user-provided library path
+            let mut path = PathBuf::from(&apath);
+            if !path.is_dir() {
+                bail!(CIError::PathNotDirectory(apath))
+            }
             path.push("libci.so");
             if !path.exists() {
                 paths::create_dir_all(&path)?;
@@ -87,6 +90,7 @@ fn install(mut config: Config, args: LibraryArgs) -> CIResult<()> {
     // get the latest source code from the repo
     info!("running wget");
     let mut wget = ProcessBuilder::new("wget");
+    wget.arg("--no-check-certificate");
     wget.args(&["-O", src_path, repo_url]);
     wget.exec_with_output()?;
 

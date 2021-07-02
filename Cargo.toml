@@ -8,9 +8,9 @@ description = "Cargo subcommands that integrate the Compiler Interrupts to the p
 edition = "2018"
 keywords = ["assembly", "llvm-ir", "plugins", "cargo", "subcommand"]
 license = "MIT"
-name = "cargo-ci"
+name = "cargo-compiler-interrupts"
 readme = "README.md"
-repository = "https://github.com/bitslab/cargo-ci"
+repository = "https://github.com/bitslab/cargo-compiler-interrupts"
 version = "2.1.0"
 
 [dependencies]

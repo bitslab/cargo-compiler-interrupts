@@ -44,6 +44,7 @@ pub fn build(args: &BuildArgs) -> CIResult<Output> {
     let rustflags = [
         "--emit=llvm-ir",
         "-Csave-temps",
+        "-Crelocation-model=static",
         "-Cpasses=postdomtree",
         "-Cpasses=mem2reg",
         "-Cpasses=indvars",
@@ -56,14 +57,6 @@ pub fn build(args: &BuildArgs) -> CIResult<Output> {
     debug!("args: {:?}", cmd.get_args());
     debug!("envs: {:?}", cmd.get_envs());
 
-    cmd.exec_with_output()
-}
-
-/// Run `cargo clean`.
-pub fn clean() -> CIResult<Output> {
-    info!("running cargo clean");
-    let mut cmd = ProcessBuilder::new("cargo");
-    cmd.arg("clean");
     cmd.exec_with_output()
 }
 

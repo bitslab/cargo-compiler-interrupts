@@ -41,4 +41,7 @@ pub enum CIError {
         Available binaries: {0}"
     )]
     BinaryNotDetermine(String),
+
+    #[error("Given path is not a valid directory: {0}")]
+    PathNotDirectory(String),
 }

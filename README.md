@@ -1,6 +1,6 @@
-# cargo-ci
+# cargo-compiler-interrupts
 
-`cargo-ci` provides you a simple way to integrate the [Compiler Interrupts](https://pldi21.sigplan.org/details/pldi-2021-papers/82/Frequent-Background-Polling-on-a-Shared-Thread-using-Light-Weight-Compiler-Interrupt) to any Cargo packages.
+`cargo-compiler-interrupts` provides you a simple way to integrate the [Compiler Interrupts](https://pldi21.sigplan.org/details/pldi-2021-papers/82/Frequent-Background-Polling-on-a-Shared-Thread-using-Light-Weight-Compiler-Interrupt) to any Cargo packages.
 
 ## Requirements
 
@@ -10,13 +10,22 @@
 
 ## Installation
 
-`cargo-ci` is a Cargo subcommand and can be installed via `cargo install` .
+`cargo-compiler-interrupts` is a Cargo package and can be installed via `cargo install` .
 
 ``` sh
-cargo install cargo-ci
+cargo install cargo-compiler-interrupts
+```
+
+You can also fetch the repo and install using `--path`.
+
+``` sh
+git clone https://github.com/bitslab/cargo-compiler-interrupts
+cargo install --path ./cargo-compiler-interrupts
 ```
 
 ## Getting started
+
+`cargo-compiler-interrupts` provides three subcommands:
 
 ``` sh
 cargo lib-ci --install    # install the CI library
@@ -24,9 +33,9 @@ cargo build-ci            # build and integrate CI to the binary
 cargo run-ci              # run the CI-integrated binary
 ```
 
-* `cargo lib-ci` to install or uninstall the Compiler Interrupts library.
-* `cargo build-ci` to build and integrate the Compiler Interrupts to the binary.
-* `cargo run-ci` to run the integrated binary. You can specify which binary to run by passing `--bin <binary_name>`.
+* `cargo lib-ci` — install or uninstall the Compiler Interrupts library.
+* `cargo build-ci` — build and integrate the Compiler Interrupts to the binary.
+* `cargo run-ci` — run the integrated binary. You can specify which binary to run by passing `--bin <BINARY_NAME>`.
 
 For more detailed usage and internals, please run the command with `--help` option and check out the **[documentation](DOCUMENTATION.md)**.
 
@@ -45,4 +54,4 @@ Quan Tran ([@quanshousio](https://quanshousio.com))
 
 ## License
 
-`cargo-ci` is available under the MIT license. See the [LICENSE](LICENSE) file for more info.
+`cargo-compiler-interrupts` is available under the MIT license. See the [LICENSE](LICENSE) file for more info.

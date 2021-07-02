@@ -1,8 +1,8 @@
-use cargo_ci::{args, ops, util, CIResult};
+use cargo_compiler_interrupts::{args, ops, util, CIResult};
 use clap::Clap;
 
 fn main() -> CIResult<()> {
-    let dargs = util::drop_name_args(cargo_ci::RUN_CI);
+    let dargs = std::env::args().skip(1).collect::<Vec<_>>();
 
     let args = args::RunArgs::parse_from(dargs);
 

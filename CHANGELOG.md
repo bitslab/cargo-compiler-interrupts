@@ -1,6 +1,10 @@
 # Change Log
 
-All notable changes to this project will be documented in this file. `cargo-ci` adheres to [Semantic Versioning](https://semver.org/).
+All notable changes to this project will be documented in this file. `cargo-compiler-interrupts` adheres to [Semantic Versioning](https://semver.org/).
+
+#### 3.x Releases
+
+- `3.0.x` Releases - [3.0.0](#300)
 
 #### 2.x Releases
 
@@ -12,11 +16,24 @@ All notable changes to this project will be documented in this file. `cargo-ci` 
 
 ---
 
-## [2.1.0](https://github.com/bitslab/cargo-ci/releases/tag/2.1.0)
+## [3.0.0](https://github.com/bitslab/cargo-compiler-interrupts/releases/tag/3.0.0)
+
+Released on 2021-07-02.
+
+#### Updated
+
+- `cargo-ci` has been renamed to `cargo-compiler-interrupts`.
+- Fix the relocation error while linking on Linux.
+
+#### Removed
+
+- Miscellaneous helper functions.
+
+---
+
+## [2.1.0](https://github.com/bitslab/cargo-compiler-interrupts/releases/tag/2.1.0)
 
 Released on 2021-06-14.
-
-- Initial release of `cargo-ci`.
 
 #### Added
 
@@ -34,7 +51,7 @@ Released on 2021-06-14.
 
 - Helper functions relating to running external LLVM utilities.
 
-## [2.0.0](https://github.com/bitslab/cargo-ci/releases/tag/2.0.0)
+## [2.0.0](https://github.com/bitslab/cargo-compiler-interrupts/releases/tag/2.0.0)
 
 Released on 2021-05-10.
 
@@ -48,8 +65,8 @@ Released on 2021-05-10.
 
 - Required minimum version for dependencies has been narrowed.
 - Path to the library file is moved to `CONFIG_DIR`.
-- Running `cargo-ci` utilities through `cargo` subcommand.
-- Running `cargo-ci` utilities when current directory is not at the root directory of the package.
+- Running `cargo-compiler-interrupts` utilities through `cargo` subcommand.
+- Running `cargo-compiler-interrupts` utilities when current directory is not at the root directory of the package.
 
 #### Removed
 
@@ -59,10 +76,10 @@ Released on 2021-05-10.
 
 ---
 
-## [1.0.0](https://github.com/bitslab/cargo-ci/releases/tag/1.0.0)
+## [1.0.0](https://github.com/bitslab/cargo-compiler-interrupts/releases/tag/1.0.0)
 
 Released on 2021-05-05.
 
 #### Added
 
-- Initial release of `cargo-ci`.
+- Initial release of `cargo-compiler-interrupts`.

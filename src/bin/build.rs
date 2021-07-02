@@ -1,10 +1,10 @@
-use cargo_ci::{args, config, ops, util, CIResult};
+use cargo_compiler_interrupts::{args, config, ops, util, CIResult};
 use clap::Clap;
 
 pub fn main() -> CIResult<()> {
     let config = config::Config::load()?;
 
-    let dargs = util::drop_name_args(cargo_ci::BUILD_CI);
+    let dargs = std::env::args().skip(1).collect::<Vec<_>>();
 
     let args = args::BuildArgs::parse_from(dargs);
 

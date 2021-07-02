@@ -1,7 +1,6 @@
 use crate::process_error::ProcessError;
 use crate::read2;
 use anyhow::{bail, Error, Result, Context};
-// use jobserver::Client;
 use shell_escape::escape;
 use std::collections::BTreeMap;
 use std::env;
@@ -22,11 +21,6 @@ pub struct ProcessBuilder {
     env: BTreeMap<String, Option<OsString>>,
     /// The directory to run the program from.
     cwd: Option<OsString>,
-    /// The `make` jobserver. See the [jobserver crate] for
-    /// more information.
-    ///
-    /// [jobserver crate]: https://docs.rs/jobserver/
-    // jobserver: Option<Client>,
     /// `true` to include environment variable in display.
     display_env_vars: bool,
 }
@@ -66,7 +60,6 @@ impl ProcessBuilder {
             args: Vec::new(),
             cwd: None,
             env: BTreeMap::new(),
-            // jobserver: None,
             display_env_vars: false,
         }
     }
@@ -156,15 +149,6 @@ impl ProcessBuilder {
     pub fn get_envs(&self) -> &BTreeMap<String, Option<OsString>> {
         &self.env
     }
-
-    /// Sets the `make` jobserver. See the [jobserver crate][jobserver_docs] for
-    /// more information.
-    ///
-    /// [jobserver_docs]: https://docs.rs/jobserver/0.1.6/jobserver/
-    // pub fn inherit_jobserver(&mut self, jobserver: &Client) -> &mut Self {
-    //     self.jobserver = Some(jobserver.clone());
-    //     self
-    // }
 
     /// Enables environment variable display.
     pub fn display_env_vars(&mut self) -> &mut Self {
@@ -348,9 +332,6 @@ impl ProcessBuilder {
                 }
             }
         }
-        // if let Some(ref c) = self.jobserver {
-        //     c.configure(&mut command);
-        // }
         command
     }
 

@@ -2,7 +2,7 @@ use clap::Clap;
 
 #[derive(Clap, Debug)]
 #[clap(
-    name = format!("cargo-{}", crate::BUILD_CI),
+    name = "cargo-build-ci",
     version = clap::crate_version!(),
     author = clap::crate_authors!(),
     about = "Compile and integrate the Compiler Interrupts to a local package",
@@ -23,7 +23,7 @@ pub struct BuildArgs {
 
 #[derive(Clap, Debug)]
 #[clap(
-    name = format!("cargo-{}", crate::RUN_CI),
+    name = "cargo-run-ci",
     version = clap::crate_version!(),
     author = clap::crate_authors!(),
     about = "Run a Compiler Interrupts-integrated binary",
@@ -48,7 +48,7 @@ pub struct RunArgs {
 
 #[derive(Clap, Debug)]
 #[clap(
-    name = format!("cargo-{}", crate::LIB_CI),
+    name = "cargo-lib-ci",
     version = clap::crate_version!(),
     author = clap::crate_authors!(),
     about = "Manage the Compiler Interrupts library"

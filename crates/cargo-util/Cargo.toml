@@ -10,10 +10,7 @@ version = "0.1.0"
 
 [dependencies]
 anyhow = "1.0"
-# crypto-hash = "0.3"
 filetime = "0.2"
-# hex = "0.4"
-# jobserver = "0.1"
 libc = "0.2"
 log = "0.4"
 same-file = "1.0"

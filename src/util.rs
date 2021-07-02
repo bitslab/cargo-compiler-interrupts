@@ -6,19 +6,6 @@ use tracing::{debug, info};
 
 use crate::CIResult;
 
-/// Drop the extra argument `name` in the arguments provided by `cargo`.
-pub fn drop_name_args(name: &str) -> impl std::iter::Iterator<Item = String> + '_ {
-    let mut found = false;
-    std::env::args().filter(move |x| {
-        if found {
-            true
-        } else {
-            found = x == name;
-            x != name
-        }
-    })
-}
-
 /// Initialize the logger.
 pub fn init_logger(verbose: i32) {
     tracing::info!("initializing logger");
@@ -66,7 +53,7 @@ pub fn set_current_package_root_dir() -> CIResult<()> {
 /// Get the path to the configuration directory.
 pub fn config_path() -> CIResult<PathBuf> {
     let mut path = dirs::config_dir().context("failed to get config dir")?;
-    path.push("cargo-ci");
+    path.push("cargo-compiler-interrupts");
     if !path.exists() {
         paths::create_dir_all(&path)?;
     }
@@ -122,30 +109,22 @@ pub fn append_suffix<P: AsRef<Path>>(path: P, suffix: &str) -> PathBuf {
     path.with_file_name(file_name)
 }
 
-/// Get the file stem of a path.
-fn file_stem<P: AsRef<Path>>(path: P) -> Option<String> {
+/// Get the file stem of a path and unwrapped by default.
+pub fn file_stem_unwrapped<P: AsRef<Path>>(path: P) -> String {
     let path = path.as_ref();
     path.file_stem()
         .map(std::ffi::OsStr::to_string_lossy)
         .map(|e| e.to_string())
+        .unwrap_or_default()
 }
 
-/// Get the file stem of a path and automatically unwrapped.
-pub fn file_stem_unwrapped<P: AsRef<Path>>(path: P) -> String {
-    file_stem(path).unwrap_or_default()
-}
-
-/// Get the file name of a path.
-fn file_name<P: AsRef<Path>>(path: P) -> Option<String> {
+/// Get the file name of a path and unwrapped by default.
+pub fn file_name_unwrapped<P: AsRef<Path>>(path: P) -> String {
     let path = path.as_ref();
     path.file_name()
         .map(std::ffi::OsStr::to_string_lossy)
         .map(|e| e.to_string())
-}
-
-/// Get the file name of a path and automatically unwrapped.
-pub fn file_name_unwrapped<P: AsRef<Path>>(path: P) -> String {
-    file_name(path).unwrap_or_default()
+        .unwrap_or_default()
 }
 
 /// Get the file extension of a path.
@@ -156,12 +135,12 @@ fn extension<P: AsRef<Path>>(path: P) -> Option<String> {
         .map(|e| e.to_string())
 }
 
-/// Get the file extension of a path and automatically unwrapped.
+/// Get the file extension of a path and unwrapped by default.
 pub fn extension_unwrapped<P: AsRef<Path>>(path: P) -> String {
     extension(path).unwrap_or_default()
 }
 
-/// Sanity check for LLVM toolchain and its binaries. Not the prettiest implementation.
+/// Sanity check for LLVM toolchain and its binaries.
 pub fn llvm_toolchain(binaries: &mut Vec<String>) -> CIResult<String> {
     use crate::error::CIError::*;
     use anyhow::bail;
@@ -178,7 +157,7 @@ pub fn llvm_toolchain(binaries: &mut Vec<String>) -> CIResult<String> {
         .to_string();
     let major_ver = rustc_ver.split(".").next().unwrap();
 
-    // get llvm version
+    // get llvm version from both binaries with and without version suffix
     let cfg = ProcessBuilder::new("llvm-config")
         .arg("--version")
         .exec_with_output();
@@ -186,7 +165,7 @@ pub fn llvm_toolchain(binaries: &mut Vec<String>) -> CIResult<String> {
         .arg("--version")
         .exec_with_output();
 
-    // check if rustc and llvm are compatible
+    // check if rustc and llvm are compatible and add version suffix if needed
     let add_sf = match (cfg, cfg_sf) {
         (Ok(o), Ok(o_sf)) => {
             let ver = String::from_utf8(o.stdout)?.trim().to_string();
@@ -218,7 +197,7 @@ pub fn llvm_toolchain(binaries: &mut Vec<String>) -> CIResult<String> {
         }
     };
 
-    // add version suffix if needed
+    // add version suffix if needed to llvm's binaries
     for binary in binaries {
         *binary = if add_sf {
             format!("{}-{}", binary, major_ver)
