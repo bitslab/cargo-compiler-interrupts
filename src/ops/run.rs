@@ -1,14 +1,17 @@
+//! Implementation of `cargo run-ci` subcommand.
+
 use anyhow::bail;
 use cargo_util::ProcessBuilder;
 use faccess::PathExt;
 
-use crate::args::RunArgs;
 use crate::error::CIError;
+use crate::opts::RunOpts;
 use crate::{util, CIResult};
 
-pub fn exec(args: RunArgs) -> CIResult<()> {
-    let deps_dir = util::target_dir(&args.target, &args.release)?;
-    let binary_paths = util::scan_dir(&deps_dir, |path| {
+/// Main routine for `cargo-run-ci`.
+pub fn exec(opts: RunOpts) -> CIResult<()> {
+    let deps_path = util::target_path(&opts.target, &opts.release)?;
+    let binary_paths = util::scan_path(&deps_path, |path| {
         path.executable() && path.is_file() && util::file_stem_unwrapped(path).contains("-ci")
     })?;
     if binary_paths.is_empty() {
@@ -17,7 +20,7 @@ pub fn exec(args: RunArgs) -> CIResult<()> {
 
     let binary_names = binary_paths
         .iter()
-        .map(|path| util::file_stem_unwrapped(path))
+        .map(util::file_stem_unwrapped)
         .map(|mut path| {
             remove_ci(&mut path);
             path
@@ -25,7 +28,7 @@ pub fn exec(args: RunArgs) -> CIResult<()> {
         .collect::<Vec<_>>()
         .join(", ");
 
-    if let Some(binary_name) = args.bin {
+    if let Some(binary_name) = opts.bin {
         for path in binary_paths {
             let mut name = util::file_name_unwrapped(&path);
             remove_ci(&mut name);
@@ -42,8 +45,8 @@ pub fn exec(args: RunArgs) -> CIResult<()> {
     bail!(CIError::BinaryNotDetermine(binary_names));
 }
 
+/// Remove suffix "-ci" from the given string.
 fn remove_ci(s: &mut String) {
-    // remove "-ci"
     s.pop();
     s.pop();
     s.pop();

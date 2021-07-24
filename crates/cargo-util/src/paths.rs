@@ -1,6 +1,6 @@
 //! Various utilities for working with files and paths.
 
-use anyhow::{bail, format_err, Error, Context, Result};
+use anyhow::{Context, Result};
 use filetime::FileTime;
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -110,8 +110,9 @@ pub fn normalize_path<P: AsRef<Path>>(path: P) -> PathBuf {
 ///
 /// Returns an error if it cannot be found.
 pub fn resolve_executable<P: AsRef<Path>>(exec: P) -> Result<PathBuf> {
-    if exec.as_ref().components().count() == 1 {
-        let paths = env::var_os("PATH").ok_or_else(|| format_err!("no PATH"))?;
+    let exec = exec.as_ref();
+    if exec.components().count() == 1 {
+        let paths = env::var_os("PATH").ok_or_else(|| anyhow::format_err!("no PATH"))?;
         let candidates = env::split_paths(&paths).flat_map(|path| {
             let candidate = path.join(&exec);
             let with_exe = if env::consts::EXE_EXTENSION.is_empty() {
@@ -129,12 +130,9 @@ pub fn resolve_executable<P: AsRef<Path>>(exec: P) -> Result<PathBuf> {
             }
         }
 
-        bail!(
-            "no executable for `{}` found in PATH",
-            exec.as_ref().display()
-        )
+        anyhow::bail!("no executable for `{}` found in PATH", exec.display())
     } else {
-        Ok(exec.as_ref().canonicalize()?)
+        Ok(exec.canonicalize()?)
     }
 }
 
@@ -145,7 +143,7 @@ pub fn read<P: AsRef<Path>>(path: P) -> Result<String> {
     let path = path.as_ref();
     match String::from_utf8(read_bytes(path)?) {
         Ok(s) => Ok(s),
-        Err(_) => bail!("path at `{}` was not valid utf-8", path.display()),
+        Err(_) => anyhow::bail!("path at `{}` was not valid utf-8", path.display()),
     }
 }
 
@@ -189,9 +187,11 @@ pub fn write_if_changed<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) ->
     Ok(())
 }
 
-/// Equivalent to [`write`], but appends to the end instead of replacing the
+/// Equivalent to [`write()`], but appends to the end instead of replacing the
 /// contents.
-pub fn append<P: AsRef<Path>>(path: &P, contents: &[u8]) -> Result<()> {
+pub fn append<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) -> Result<()> {
+    let path = path.as_ref();
+    let contents = contents.as_ref();
     (|| -> Result<()> {
         let mut f = OpenOptions::new()
             .write(true)
@@ -202,7 +202,7 @@ pub fn append<P: AsRef<Path>>(path: &P, contents: &[u8]) -> Result<()> {
         f.write_all(contents)?;
         Ok(())
     })()
-    .with_context(|| format!("failed to write `{}`", path.as_ref().display()))?;
+    .with_context(|| format!("failed to write `{}`", path.display()))?;
     Ok(())
 }
 
@@ -219,7 +219,7 @@ pub fn open<P: AsRef<Path>>(path: P) -> Result<File> {
 }
 
 /// Returns the last modification time of a file.
-pub fn mtime<P: AsRef<Path>>(path: &P) -> Result<FileTime> {
+pub fn mtime<P: AsRef<Path>>(path: P) -> Result<FileTime> {
     let path = path.as_ref();
     let meta =
         fs::metadata(path).with_context(|| format!("failed to stat `{}`", path.display()))?;
@@ -228,7 +228,7 @@ pub fn mtime<P: AsRef<Path>>(path: &P) -> Result<FileTime> {
 
 /// Returns the maximum mtime of the given path, recursing into
 /// subdirectories, and following symlinks.
-pub fn mtime_recursive<P: AsRef<Path>>(path: &P) -> Result<FileTime> {
+pub fn mtime_recursive<P: AsRef<Path>>(path: P) -> Result<FileTime> {
     let path = path.as_ref();
     let meta =
         fs::metadata(path).with_context(|| format!("failed to stat `{}`", path.display()))?;
@@ -326,27 +326,28 @@ pub fn set_invocation_time<P: AsRef<Path>>(path: P) -> Result<FileTime> {
 }
 
 /// Converts a path to UTF-8 bytes.
-pub fn path2bytes<P: AsRef<Path>>(path: &P) -> Result<&[u8]> {
+pub fn path2bytes<P: AsRef<Path>>(path: P) -> Result<Vec<u8>> {
     let path = path.as_ref();
     #[cfg(unix)]
     {
         use std::os::unix::prelude::*;
-        Ok(path.as_os_str().as_bytes())
+        Ok(path.as_os_str().as_bytes().to_vec())
     }
     #[cfg(windows)]
     {
         match path.as_os_str().to_str() {
-            Some(s) => Ok(s.as_bytes()),
-            None => Err(format_err!(
+            Some(s) => Ok(s.as_bytes().to_vec()),
+            None => Err(anyhow::format_err!(
                 "invalid non-unicode path: {}",
-                path.as_ref().display()
+                path.display()
             )),
         }
     }
 }
 
 /// Converts UTF-8 bytes to a path.
-pub fn bytes2path(bytes: &[u8]) -> Result<PathBuf> {
+pub fn bytes2path<C: AsRef<[u8]>>(bytes: C) -> Result<PathBuf> {
+    let bytes = bytes.as_ref();
     #[cfg(unix)]
     {
         use std::os::unix::prelude::*;
@@ -357,7 +358,7 @@ pub fn bytes2path(bytes: &[u8]) -> Result<PathBuf> {
         use std::str;
         match str::from_utf8(bytes) {
             Ok(s) => Ok(PathBuf::from(s)),
-            Err(..) => Err(format_err!("invalid non-unicode path")),
+            Err(..) => Err(anyhow::format_err!("invalid non-unicode path")),
         }
     }
 }
@@ -500,7 +501,7 @@ fn set_not_readonly<P: AsRef<Path>>(p: P) -> io::Result<bool> {
 /// Hardlink (file) or symlink (dir) src to dst if possible, otherwise copy it.
 ///
 /// If the destination already exists, it is removed before linking.
-pub fn link_or_copy(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Result<()> {
+pub fn link_or_copy<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dst: Q) -> Result<()> {
     let src = src.as_ref();
     let dst = dst.as_ref();
     _link_or_copy(src, dst)
@@ -625,7 +626,7 @@ pub fn strip_prefix_canonical<P: AsRef<Path>>(
 ///
 /// This function is idempotent and in addition to that it won't exclude ``p`` from cache if it
 /// already exists.
-pub fn create_dir_all_excluded_from_backups_atomic(p: impl AsRef<Path>) -> Result<()> {
+pub fn create_dir_all_excluded_from_backups_atomic<P: AsRef<Path>>(p: P) -> Result<()> {
     let path = p.as_ref();
     if path.is_dir() {
         return Ok(());
@@ -647,6 +648,7 @@ pub fn create_dir_all_excluded_from_backups_atomic(p: impl AsRef<Path>) -> Resul
     // point as the old one).
     let tempdir = TempFileBuilder::new().prefix(base).tempdir_in(parent)?;
     exclude_from_backups(tempdir.path());
+    exclude_from_content_indexing(tempdir.path());
     // Previously std::fs::create_dir_all() (through paths::create_dir_all()) was used
     // here to create the directory directly and fs::create_dir_all() explicitly treats
     // the directory being created concurrently by another thread or process as success,
@@ -655,7 +657,7 @@ pub fn create_dir_all_excluded_from_backups_atomic(p: impl AsRef<Path>) -> Resul
     // we can infer from it it's another cargo process doing work.
     if let Err(e) = fs::rename(tempdir.path(), path) {
         if !path.exists() {
-            return Err(Error::from(e));
+            return Err(anyhow::Error::from(e));
         }
     }
     Ok(())
@@ -678,6 +680,35 @@ fn exclude_from_backups(path: &Path) {
 ",
     );
     // Similarly to exclude_from_time_machine() we ignore errors here as it's an optional feature.
+}
+
+/// Marks the directory as excluded from content indexing.
+///
+/// This is recommended to prevent the content of derived/temporary files from being indexed.
+/// This is very important for Windows users, as the live content indexing significantly slows
+/// cargo's I/O operations.
+///
+/// This is currently a no-op on non-Windows platforms.
+fn exclude_from_content_indexing(path: &Path) {
+    #[cfg(windows)]
+    {
+        use std::iter::once;
+        use std::os::windows::prelude::OsStrExt;
+        use winapi::um::fileapi::{GetFileAttributesW, SetFileAttributesW};
+        use winapi::um::winnt::FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+
+        let path: Vec<u16> = path.as_os_str().encode_wide().chain(once(0)).collect();
+        unsafe {
+            SetFileAttributesW(
+                path.as_ptr(),
+                GetFileAttributesW(path.as_ptr()) | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED,
+            );
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+    }
 }
 
 #[cfg(not(target_os = "macos"))]

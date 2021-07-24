@@ -1,17 +1,51 @@
+//! Implementation of `cargo build-ci` subcommand.
+
 use std::collections::{HashMap, HashSet};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::process::{Output, Stdio};
+use std::sync::mpsc;
 
 use anyhow::{bail, Context};
-use cargo_util::{paths, ProcessBuilder};
+use cargo_metadata::{Metadata, MetadataCommand};
+use cargo_util::{paths, ProcessBuilder, ProcessError};
+use colored::Colorize;
 use faccess::PathExt;
-use tracing::debug;
+use indicatif::{ProgressBar, ProgressStyle};
+use rayon::prelude::*;
+use tracing::{debug, info};
 
-use crate::args::BuildArgs;
 use crate::config::Config;
 use crate::error::CIError;
-use crate::{cargo, util, CIResult};
+use crate::opts::BuildOpts;
+use crate::{util, CIResult};
 
-pub fn exec(config: Config, args: BuildArgs) -> CIResult<()> {
+/// State of the integration.
+#[derive(Debug)]
+enum State {
+    /// Running `opt`.
+    Opt(bool),
+    /// Running `llc`.
+    Llc(bool),
+    /// Running linker.
+    Ld(bool),
+    /// Crate is skipped.
+    Skipped,
+    /// An error occurred.
+    Error,
+}
+
+/// Information about the integration.
+#[derive(Debug)]
+struct Integration {
+    /// Name of the crate.
+    crate_name: String,
+    /// State of the integration.
+    state: State,
+}
+
+/// Main routine for `cargo-build-ci`.
+pub fn exec(config: Config, opts: BuildOpts) -> CIResult<()> {
     if !Path::new(&config.library_path).is_file() {
         bail!(CIError::LibraryNotInstalled);
     }
@@ -22,20 +56,45 @@ pub fn exec(config: Config, args: BuildArgs) -> CIResult<()> {
         .collect();
     util::llvm_toolchain(&mut llvm_bins)?;
 
-    println!("Compiling...");
+    let opt = &llvm_bins[0];
+    let llc = &llvm_bins[1];
+    let ar = &llvm_bins[2];
+    let nm = &llvm_bins[3];
+
+    // get binary names
+    let mut crate_names = Vec::new();
+    let metadata = cargo_metadata()?;
+    for package in metadata.packages {
+        for target in package.targets {
+            let t = target.crate_types.iter();
+            let k = target.kind.iter();
+            if t.zip(k).all(|(t, k)| t == "bin" && k == "bin") {
+                crate_names.push(target.name.replace("-", "_"));
+            }
+        }
+    }
+    debug!("crate_names: {:#?}", crate_names);
+
+    if crate_names.is_empty() {
+        bail!(CIError::BinaryNotFound);
+    }
+
+    if opts.debug_ci {
+        println!("{:>12} Debugging mode is enabled", "Note".cyan().bold());
+    }
 
     let mut mtimes = HashMap::new();
     let mut stale_files = Vec::new();
 
-    let target_dir = util::target_dir(&args.target, &args.release)?;
-    let deps_dir = target_dir.join("deps");
-    let deps_ci_dir = target_dir.join("deps-ci");
+    let target_path = util::target_path(&opts.target, &opts.release)?;
+    let deps_path = target_path.join("deps");
+    let deps_ci_path = target_path.join("deps-ci");
 
     // create new "deps-ci" directory for CI-integrated files
-    paths::create_dir_all(&deps_ci_dir)?;
+    paths::create_dir_all(&deps_ci_path)?;
 
     // get timestamp from output files before running `cargo build`
-    if let Ok(target_files) = util::scan_dir(&deps_dir, |path| path.is_file()) {
+    if let Ok(target_files) = util::scan_path(&deps_path, |path| path.is_file()) {
         for file in target_files {
             let mtime = paths::mtime(&file)?;
             assert!(mtimes.insert(file, mtime).is_none());
@@ -43,11 +102,13 @@ pub fn exec(config: Config, args: BuildArgs) -> CIResult<()> {
     }
 
     // run `cargo build`
-    let cargo_build = cargo::build(&args)?;
-    debug!("cargo_build: {:?}", cargo_build);
+    let cargo_build = cargo_build(&opts)?;
+
+    // let's go
+    let time = std::time::Instant::now();
 
     // check for stale files after the compilation
-    let deps_files = util::scan_dir(&deps_dir, |path| path.is_file())?;
+    let deps_files = util::scan_path(&deps_path, |path| path.is_file())?;
     for file in &deps_files {
         let new_mtime = paths::mtime(&file)?;
         match mtimes.get(file) {
@@ -66,33 +127,20 @@ pub fn exec(config: Config, args: BuildArgs) -> CIResult<()> {
     debug!("stale_files: {:#?}", stale_files);
 
     if stale_files.is_empty() {
-        println!("Nothing to integrate, all fresh");
+        println!(
+            "{:>12} nothing to integrate, all fresh",
+            "Finished".green().bold(),
+        );
         return Ok(());
     }
 
-    println!("Integrating...");
-
-    // get binary names
-    let mut bin_names = vec![];
-    let metadata = cargo::metadata()?;
-    for package in metadata.packages {
-        for target in package.targets {
-            let t = target.crate_types.iter();
-            let k = target.kind.iter();
-            if t.zip(k).all(|(t, k)| t == "bin" && k == "bin") {
-                bin_names.push(target.name.replace("-", "_"));
-            }
-        }
-    }
-    debug!("bin_names: {:#?}", bin_names);
-
-    // name of stale binaries
-    let stale_bin_names = stale_files
+    // name of stale crates
+    let stale_crate_names = stale_files
         .iter()
-        .filter(|file| bin_names.contains(&binary_name(file)))
-        .map(|file| binary_name(file))
+        .filter(|file| crate_names.contains(&crate_name(file)))
+        .map(crate_name)
         .collect::<HashSet<_>>();
-    debug!("stale_bin_names: {:#?}", stale_bin_names);
+    debug!("stale_crate_names: {:#?}", stale_crate_names);
 
     // *.rcgu.ll are intermediate files generated by `rustc -C save-temps`
     let ll_files = deps_files
@@ -103,210 +151,563 @@ pub fn exec(config: Config, args: BuildArgs) -> CIResult<()> {
         })
         .collect::<Vec<_>>();
 
-    // run the integration
-    let config = std::sync::Arc::new(config);
-    let mut threads = vec![];
-    for file in ll_files {
-        let file = file.clone();
-        let config = config.clone();
-        let bin_names = bin_names.clone();
-        let llvm_bins = llvm_bins.clone();
-
-        let thread = std::thread::spawn(move || -> CIResult<()> {
-            debug!("integrating: {}", file.display());
-            let ci_file = util::append_suffix(r_depsci(&file), "ci");
-
-            // `nm -jU` displays defined symbol names
-            let nm = ProcessBuilder::new(&llvm_bins[3])
-                .arg("-jU")
-                .arg(file.with_extension("o"))
-                .exec_with_output()?;
-            let stdout = String::from_utf8(nm.stdout)?;
-            if stdout.contains("_intvActionHook") {
-                // skip object file contains CI symbols
-                paths::copy(&file, &ci_file)?;
-            } else {
-                // define `LocalLC` if it is a binary target
-                let def_clock = match bin_names.contains(&binary_name(&file)) {
-                    true => "-defclock=1",
-                    false => "-defclock=0",
-                };
-
-                let mut args = [
-                    "-S",
-                    "-load",
-                    &config.library_path,
-                    "-logicalclock",
-                    def_clock,
-                ]
-                .iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>();
-                args.extend(config.default_args.clone());
-
-                // `opt` runs the integration
-                ProcessBuilder::new(&llvm_bins[0])
-                    .args(&args)
-                    .arg(&file)
-                    .arg("-o")
-                    .arg(&ci_file)
-                    .exec_with_output()?;
-            }
-
-            // `llc` transforms integrated IR bitcode to object file
-            ProcessBuilder::new(&llvm_bins[1])
-                .arg("-filetype=obj")
-                .arg(ci_file)
-                .exec_with_output()?;
-
-            Ok(())
-        });
-        threads.push(thread);
-    }
-    for thread in threads {
-        thread.join().expect("failed to join thread")?;
-    }
-
-    // sample of the expected `cargo build` output
-    // INFO rustc_codegen_ssa::back::link preparing Executable to "/path/to/binary"
-    // INFO rustc_codegen_ssa::back::link "cc" "-m64 "-arch" "x86_64" ...
-
-    // parse output to get the linker command
-    debug!("parsing linker");
-    let stderr = String::from_utf8(cargo_build.stderr)?;
-    let mut infos = stderr
-        .lines()
-        .filter(|x| x.contains("INFO rustc_codegen_ssa::back::link"));
-
-    'outer: while let Some(info) = infos.next() {
+    // parsing cargo build output to get the linker invocation
+    let iter = cargo_build.iter();
+    let mut linkers: Vec<(Vec<String>, String)> = Vec::new();
+    'outer: for info in iter {
         if !info.contains("libcompiler_builtins") {
-            // ignore if this is not a linker command
+            // ignore as this is not a linker invocation
             continue;
         }
 
-        let mut cmd = info
+        let linker = info
             .replace("\"", "")
             .split_ascii_whitespace()
             .skip(2) // skip "INFO", "rustc_codegen_ssa::back::link"
             .map(str::to_string)
             .collect::<Vec<_>>();
 
-        // parse the args to find the name of the binary
-        let mut iter = cmd.iter();
+        let mut iter = linker.iter();
+        let mut bin_path = String::new();
         while let Some(arg) = iter.next() {
             if arg.contains("-o") {
-                let bin_path = iter.next().context("expect path to binary")?;
-                let bin_name = binary_name(bin_path);
+                bin_path = iter.next().context("expected path to binary")?.to_string();
+                let crate_name = crate_name(&bin_path);
 
-                if !stale_bin_names.contains(&bin_name) {
-                    // redundant linker cmd since the binary is still fresh
-                    debug!("skipping linker invocation for binary \"{}\"", bin_name);
+                if !stale_crate_names.contains(&crate_name) {
+                    // redundant linker as the binary is still fresh
+                    debug!("skipping linker invocation for binary \"{}\"", crate_name);
                     continue 'outer;
                 }
             }
         }
 
-        debug!("finding allocator shim");
-        let object_files = cmd.iter_mut().filter(|e| e.contains(".o"));
-        for file in object_files {
-            // find the object file contains the symbol for memory allocator
-            let nm = ProcessBuilder::new(&llvm_bins[3])
-                .arg("-jU")
-                .arg(&file)
-                .exec_with_output()?;
-            let stdout = String::from_utf8(nm.stdout)?;
-            if stdout.contains("__rust_alloc") {
-                debug!("found allocator shim: {}", file);
-                paths::copy(&file, r_depsci(&file))?;
-            } else {
-                *file = util::append_suffix(&file, "ci").display().to_string();
-            }
-        }
-        debug!("finding allocator shim... done");
-
-        let deps_rlib_files = cmd
-            .iter_mut()
-            .filter(|e| e.contains("deps") && e.contains(".rlib"));
-        for file in deps_rlib_files {
-            debug!("replacing object file for rlib: {}", file);
-
-            // list all object files inside rlib
-            let ar = ProcessBuilder::new(&llvm_bins[2])
-                .arg("-t")
-                .arg(&file)
-                .exec_with_output()?;
-            let stdout = String::from_utf8(ar.stdout)?;
-            if let Some(rcgu_obj_file_name) = stdout.lines().find(|e| e.contains("rcgu")) {
-                debug!("found obj file: {}", rcgu_obj_file_name);
-                let rcgu_obj_file = deps_dir.join(rcgu_obj_file_name);
-                let rcgu_obj_ci_file = util::append_suffix(r_depsci(&rcgu_obj_file), "ci");
-
-                // copy the rlib file to the "deps-ci" dir
-                let ci_file = r_depsci(&file);
-                paths::copy(&file, &ci_file)?;
-
-                // replace *.o with *-ci.o
-                ProcessBuilder::new(&llvm_bins[2])
-                    .arg("-rb")
-                    .arg(&rcgu_obj_file)
-                    .arg(&ci_file)
-                    .arg(&rcgu_obj_ci_file)
-                    .exec_with_output()?;
-
-                // delete old *.o 
-                ProcessBuilder::new(&llvm_bins[2])
-                    .arg("-d")
-                    .arg(&ci_file)
-                    .arg(&rcgu_obj_file)
-                    .exec_with_output()?;
-            }
-        }
-
-        // replace all "deps" to "deps-ci"
-        for arg in &mut cmd {
-            *arg = arg.replace("deps", "deps-ci");
-        }
-
-        // execute the linker
-        debug!("executing linker");
-        debug!("linker: {:#?}", cmd);
-        let mut iter = cmd.iter();
-        let mut linker = ProcessBuilder::new(iter.next().context("expect linker name")?);
-        for arg in iter {
-            linker.arg(arg);
-        }
-        let output = linker.exec_with_output()?;
-        debug!("linker output: {:?}", output);
+        linkers.push((linker, bin_path));
     }
 
+    let term_size = term_size::dimensions().unwrap_or((80, 24));
+    debug!("term_size: {:?}", term_size);
+
+    let (tx, rx) = mpsc::channel::<Integration>();
+
+    // progress bar
+    let len = ll_files.len() * 2 + linkers.len() + 1;
+    let pb = if opts.verbose == 0 {
+        ProgressBar::new(len as u64)
+    } else {
+        ProgressBar::hidden()
+    };
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template(if term_size.0 > 80 {
+                "{prefix:>12.cyan.bold} [{bar:27}] {pos}/{len}: {wide_msg}"
+            } else {
+                "{prefix:>12.cyan.bold} {pos}/{len}: {wide_msg}"
+            })
+            .progress_chars("=> "),
+    );
+    pb.set_prefix("Building");
+
+    // handle progress bar rendering
+    let progress_bar_thread = std::thread::spawn(move || {
+        let mut names = Vec::new();
+        let mut error = false;
+
+        while let Ok(integration) = rx.recv() {
+            if error {
+                continue;
+            }
+
+            let name = integration.crate_name;
+            let status_line =
+                |status: &str| -> String { format!("{:>12} {}", status.green().bold(), name) };
+            let mut remove = |name| {
+                let idx = names
+                    .iter()
+                    .position(|e| *e == name)
+                    .expect("failed to find crate name");
+                names.remove(idx);
+            };
+
+            match integration.state {
+                State::Opt(finished) => {
+                    if finished {
+                        remove(name);
+                    } else {
+                        pb.println(status_line("Integrating"));
+                        pb.inc(1);
+                        names.insert(0, name);
+                    }
+                }
+                State::Llc(finished) => {
+                    let name = format!("{}(llc)", name);
+                    if finished {
+                        remove(name);
+                    } else {
+                        pb.inc(1);
+                        names.insert(0, name);
+                    }
+                }
+                State::Ld(finished) => {
+                    let name = format!("{}(bin)", name);
+                    if finished {
+                        remove(name);
+                    } else {
+                        pb.println(status_line("Linking"));
+                        pb.inc(1);
+                        names.insert(0, name);
+                    }
+                }
+                State::Skipped => {
+                    // redundant to print `compiler_interrupts` status as it is always skipped
+                    if name != "compiler_interrupts" {
+                        pb.println(status_line("Skipped"));
+                    }
+                    pb.inc(1);
+                }
+                State::Error => {
+                    pb.set_style(
+                        ProgressStyle::default_bar().template("{prefix:>12.red.bold} {msg}"),
+                    );
+                    pb.set_prefix("Error");
+                    pb.finish_with_message(
+                        "Compiler Interrupts integration has unexpectedly failed",
+                    );
+                    println!(
+                        "{:>12} Waiting for other jobs to finish...",
+                        "Note".cyan().bold(),
+                    );
+
+                    // we must not prematurely close the channel
+                    // channel must live until all threads are done sending signals
+                    error = true;
+                    continue;
+                }
+            }
+
+            // message
+            let term_size = term_size::dimensions().unwrap_or((80, 24));
+            let prefix_size = if term_size.0 > 80 { 50 } else { 20 };
+            let mut msg = String::new();
+            let mut iter = names.iter();
+            let first = match iter.next() {
+                Some(first) => first,
+                None => "",
+            };
+            msg.push_str(first);
+            for name in iter {
+                msg.push_str(", ");
+                // truncate the message if too wide
+                if msg.len() + name.len() < term_size.0 - prefix_size - /* padding */ 15 {
+                    msg.push_str(name);
+                } else {
+                    msg.push_str("...");
+                    break;
+                }
+            }
+            pb.set_message(msg);
+        }
+
+        if !error {
+            pb.finish_and_clear();
+        }
+    });
+
+    // run integration
+    ll_files
+        .par_iter()
+        .try_for_each_with(tx.clone(), |tx, file| -> CIResult<()> {
+            let mut integrate = true;
+            let crate_name = crate_name(&file);
+            let ci_file = util::append_suffix(r_depsci(&file), "ci");
+
+            // `nm -jU` displays defined symbol names
+            let output = ProcessBuilder::new(nm)
+                .arg("-jU")
+                .arg(file.with_extension("o"))
+                .exec_with_output()?;
+            let stdout = String::from_utf8(output.stdout)?;
+            if stdout.contains("intvActionHook") {
+                // skip the `compiler-interrupts` crate
+                integrate = false;
+            }
+            if let Some(skip_crates) = &opts.skip_crates {
+                for skip_crate in skip_crates {
+                    if skip_crate.replace("-", "_").contains(&crate_name) {
+                        // skip the given crates
+                        integrate = false;
+                        break;
+                    }
+                }
+            }
+
+            if integrate {
+                info!("integrating: {}", file.display());
+                tx.send(Integration {
+                    crate_name: crate_name.clone(),
+                    state: State::Opt(false),
+                })?;
+
+                // define `LocalLC` if it is a binary target
+                let def_clock = match crate_names.contains(&crate_name) {
+                    true => "-defclock=1",
+                    false => "-defclock=0",
+                };
+
+                // `opt` runs the integration
+                let output = ProcessBuilder::new(opt)
+                    .args(&[
+                        "-S",
+                        "-load",
+                        &config.library_path,
+                        "-logicalclock",
+                        def_clock,
+                    ])
+                    .args(&config.default_args)
+                    .arg(&file)
+                    .arg("-o")
+                    .arg(&ci_file)
+                    .exec_with_output();
+                handle_output(output, &ci_file, tx, opts.debug_ci)?;
+
+                tx.send(Integration {
+                    crate_name: crate_name.clone(),
+                    state: State::Opt(true),
+                })?;
+            } else {
+                info!("integration skipped: {}", file.display());
+                tx.send(Integration {
+                    crate_name: crate_name.clone(),
+                    state: State::Skipped,
+                })?;
+                paths::copy(&file, &ci_file)?;
+            }
+
+            // `llc` transforms integrated IR bitcode to object file
+            debug!("run llc on: {}", ci_file.display());
+            tx.send(Integration {
+                crate_name: crate_name.clone(),
+                state: State::Llc(false),
+            })?;
+
+            let mut llc = ProcessBuilder::new(llc);
+            llc.arg("-filetype=obj");
+            llc.arg(&ci_file);
+
+            // `-code-model=large` fixes mismatch relocation symbols on Linux
+            if std::env::consts::OS == "linux" {
+                llc.arg("-code-model=large");
+            }
+
+            let output = llc.exec_with_output();
+            handle_output(output, &ci_file, tx, opts.debug_ci)?;
+
+            tx.send(Integration {
+                crate_name,
+                state: State::Llc(true),
+            })?;
+
+            Ok(())
+        })
+        .context("integration thread failed")?;
+
+    // run linker
+    linkers
+        .par_iter_mut()
+        .try_for_each_with(tx, |tx, linker| -> CIResult<()> {
+            let crate_name = crate_name(&linker.1);
+            info!("linking: {}", crate_name);
+            tx.send(Integration {
+                crate_name: crate_name.clone(),
+                state: State::Ld(false),
+            })?;
+            let object_files = linker.0.iter_mut().filter(|e| e.contains(".o"));
+            for file in object_files {
+                // find the object file contains the symbol for memory allocator
+                let output = ProcessBuilder::new(nm)
+                    .arg("-jU")
+                    .arg(&file)
+                    .exec_with_output()?;
+                let stdout = String::from_utf8(output.stdout)?;
+                if stdout.contains("__rust_alloc") {
+                    debug!("found allocator shim: {}", file);
+                    paths::copy(&file, r_depsci(&file))?;
+                } else {
+                    *file = util::append_suffix(&file, "ci").display().to_string();
+                }
+            }
+
+            let deps_rlib_files = linker
+                .0
+                .iter_mut()
+                .filter(|e| e.contains("deps") && e.contains(".rlib"));
+            for file in deps_rlib_files {
+                debug!("replacing object file for rlib: {}", file);
+
+                // list all object files inside rlib
+                let output = ProcessBuilder::new(ar)
+                    .arg("-t")
+                    .arg(&file)
+                    .exec_with_output()?;
+                let stdout = String::from_utf8(output.stdout)?;
+                if let Some(rcgu_obj_file_name) = stdout.lines().find(|e| e.contains("rcgu")) {
+                    debug!("found obj file: {}", rcgu_obj_file_name);
+                    let rcgu_obj_file = deps_path.join(rcgu_obj_file_name);
+                    let rcgu_obj_ci_file = util::append_suffix(r_depsci(&rcgu_obj_file), "ci");
+
+                    // copy the rlib file to the "deps-ci" dir
+                    let ci_file = r_depsci(&file);
+                    paths::copy(&file, &ci_file)?;
+
+                    // replace *.o with *-ci.o
+                    ProcessBuilder::new(ar)
+                        .arg("-rb")
+                        .arg(&rcgu_obj_file)
+                        .arg(&ci_file)
+                        .arg(&rcgu_obj_ci_file)
+                        .exec_with_output()?;
+
+                    // delete old *.o
+                    ProcessBuilder::new(ar)
+                        .arg("-d")
+                        .arg(&ci_file)
+                        .arg(&rcgu_obj_file)
+                        .exec_with_output()?;
+                }
+            }
+
+            for arg in linker.0.iter_mut() {
+                // replace all "deps" with "deps-ci"
+                *arg = arg.replace("deps", "deps-ci");
+            }
+
+            // execute the linker
+            debug!("linker: {:#?}", linker);
+            let mut iter = linker.0.iter();
+            let mut linker_builder =
+                ProcessBuilder::new(iter.next().context("expected linker binary name")?);
+            for arg in iter {
+                linker_builder.arg(arg);
+            }
+            let output = linker_builder.exec_with_output();
+            debug!("linker output: {:?}", output);
+            handle_output(output, &linker.1, tx, opts.debug_ci)?;
+
+            tx.send(Integration {
+                crate_name,
+                state: State::Ld(true),
+            })?;
+
+            Ok(())
+        })
+        .context("linker thread failed")?;
+
     // copy CI-integrated binary file to the parent directory
-    let deps_ci_files = util::scan_dir(&deps_ci_dir, |path| path.is_file())?;
+    let deps_ci_files = util::scan_path(&deps_ci_path, |path| path.is_file())?;
     let binary_files = deps_ci_files
         .iter()
         .filter(|path| path.executable() && path.is_file())
         .collect::<Vec<_>>();
     for file in binary_files {
-        let file_name = binary_name(&file).replace("_", "-");
+        let file_name = crate_name(&file).replace("_", "-");
         let parent = file.parent().context("failed to get parent dir")?;
         let path = parent.with_file_name(file_name);
         let path = util::append_suffix(&path, "ci");
         paths::copy(file, path)?;
     }
 
-    println!("Done. Run `cargo run-ci` to execute the integrated binary");
+    progress_bar_thread
+        .join()
+        .expect("progress bar thread failed");
+
+    println!(
+        "{:>12} integrated {} target(s) in {}",
+        "Finished".green().bold(),
+        linkers.len(),
+        util::human_duration(time.elapsed())
+    );
 
     Ok(())
 }
 
+/// Handle output from the process and validate output file.
+fn handle_output<P: AsRef<Path>>(
+    output: CIResult<Output>,
+    output_file: P,
+    tx: &mut mpsc::Sender<Integration>,
+    debug: bool,
+) -> CIResult<()> {
+    let output_file = output_file.as_ref();
+    let crate_name = crate_name(&output_file);
+    match output {
+        Ok(output) => {
+            if !output_file.is_file() {
+                // output file does not exist
+                tx.send(Integration {
+                    crate_name,
+                    state: State::Error,
+                })?;
+                let stderr = String::from_utf8(output.stderr)?;
+                bail!(
+                    "process returned success but output file does not exist\n\
+                    expected file: {}\nprocess output:\n{}",
+                    output_file.display(),
+                    stderr
+                );
+            }
+            Ok(())
+        }
+        Err(err) => {
+            tx.send(Integration {
+                crate_name,
+                state: State::Error,
+            })?;
+            let proc_err = err
+                .downcast_ref::<ProcessError>()
+                .context("process didn't execute by exec_with_output")?;
+            let mut out: Vec<_>;
+            if debug {
+                out = proc_err.desc.lines().take(1).collect::<Vec<_>>();
+                let desc = proc_err.desc.clone();
+
+                // set log file name
+                let digest = md5::compute(desc.as_bytes());
+                let date = chrono::Local::now().format("%y%m%dT%H%M%S").to_string();
+                let mut path = util::config_path()?;
+                path.push(format!("CI-{}-{:x}.log", date, digest));
+
+                // output to the log file
+                paths::write(&path, desc)?;
+                let path_str = path
+                    .into_os_string()
+                    .into_string()
+                    .expect("path is not valid utf-8");
+                println!(
+                    "Consider filing an issue report on \
+                    \"https://github.com/bitslab/CompilerInterrupts\" \
+                    with the LLVM IR file and log attached"
+                );
+                println!("Path to the log: {}\n", path_str);
+            } else {
+                out = proc_err.desc.lines().take(2).collect::<Vec<_>>();
+                // take last few output lines to not polluting the terminal
+                let mut desc = proc_err.desc.lines().rev().take(10).collect::<Vec<_>>();
+                desc.reverse();
+                out.append(&mut desc);
+                println!("Run `cargo-build-ci` with `--debug-ci` to enable full logging\n");
+            }
+            bail!("process didn't exit successfully: {}", out.join("\n"));
+        }
+    }
+}
+
+/// Run `cargo build` and return a vector contains linker command.
+fn cargo_build(opts: &BuildOpts) -> CIResult<Vec<String>> {
+    info!("running cargo build");
+
+    let mut cmd = ProcessBuilder::new("cargo");
+    cmd.arg("build");
+
+    // release mode
+    if opts.release {
+        cmd.arg("--release");
+    }
+
+    // target
+    if let Some(target) = &opts.target {
+        cmd.arg("--target");
+        cmd.arg(target);
+    }
+
+    // color output
+    cmd.env("CARGO_TERM_COLOR", "always");
+
+    // print the internal linker invocation
+    cmd.env("RUSTC_LOG", "rustc_codegen_ssa::back::link=info");
+
+    // NOTE: cargo uses RUSTFLAGS first, hence overriding flags in config.toml
+    // should find an alternative way to respect end-user's rustc flags
+    // https://doc.rust-lang.org/cargo/reference/config.html#buildrustflags
+    // moreover, adding external flags will trigger full re-compilation
+    // when end-user executes normal `cargo build`
+
+    // `--emit=llvm-ir` to emit LLVM IR bitcode
+    // `-C save-temps` to save temporary files during the compilation
+    // `-C passes` to pass extra LLVM passes to the compilation
+    // https://doc.rust-lang.org/rustc/codegen-options/index.html
+
+    // for some reason `env` does not escape quote in string literal...
+    let rustflags = [
+        "--emit=llvm-ir",
+        "-Csave-temps",
+        "-Cpasses=postdomtree",
+        "-Cpasses=mem2reg",
+        "-Cpasses=indvars",
+        "-Cpasses=loop-simplify",
+        "-Cpasses=branch-prob",
+        "-Cpasses=scalar-evolution",
+    ];
+    cmd.env("RUSTFLAGS", rustflags.join(" "));
+
+    debug!("opts: {:#?}", cmd.get_args());
+    debug!("envs: {:#?}", cmd.get_envs());
+
+    let mut cmd = cmd.build_command();
+    cmd.stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().with_context(|| {
+        ProcessError::new("could not execute process `cargo build`", None, None)
+    })?;
+
+    let stderr = child
+        .stderr
+        .take()
+        .context("failed to get stderr from `cargo build`")?;
+    let reader = BufReader::new(stderr);
+
+    let mut link_info = Vec::new();
+    for line in reader.lines().filter_map(|x| x.ok()) {
+        // sample of the expected linker output
+        // INFO rustc_codegen_ssa::back::link preparing Executable to "/path/to/binary"
+        // INFO rustc_codegen_ssa::back::link "cc" "-m64 "-arch" "x86_64" ...
+        if line.contains("INFO rustc_codegen_ssa::back::link") {
+            link_info.push(line);
+        } else if !line.is_empty() {
+            println!("{}", line);
+        }
+    }
+
+    let exit = child.wait()?;
+    if exit.success() {
+        Ok(link_info)
+    } else {
+        Err(ProcessError::new(
+            "process didn't exit successfully: `cargo build`",
+            Some(exit),
+            None,
+        )
+        .into())
+    }
+}
+
+/// Run `cargo metadata`.
+fn cargo_metadata() -> CIResult<Metadata> {
+    info!("running cargo metadata");
+    let mut cmd = MetadataCommand::new();
+    cmd.no_deps();
+    let metadata = cmd.exec().context("failed to execute `cargo metadata`")?;
+    Ok(metadata)
+}
+
 /// Get the binary name from path.
-fn binary_name<P: AsRef<Path>>(path: P) -> String {
+fn crate_name<P: AsRef<Path>>(path: P) -> String {
     util::file_stem_unwrapped(path)
         .split('.')
         .next()
-        .unwrap()
+        .expect("invalid crate name, expected '.'")
         .split('-')
         .next()
-        .unwrap()
+        .expect("invalid crate name, expected '-'")
         .to_string()
 }
 

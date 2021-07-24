@@ -1,13 +1,16 @@
+//! Handles options for the subcommands.
+
 use clap::Clap;
 
+/// Options for `cargo-build-ci`.
 #[derive(Clap, Debug)]
 #[clap(
     name = "cargo-build-ci",
     version = clap::crate_version!(),
     author = clap::crate_authors!(),
-    about = "Compile and integrate the Compiler Interrupts to a local package",
+    about = "Compile and integrate the Compiler Interrupts to a package",
 )]
-pub struct BuildArgs {
+pub struct BuildOpts {
     /// Build artifacts in release mode
     #[clap(short, long)]
     pub release: bool,
@@ -16,11 +19,26 @@ pub struct BuildArgs {
     #[clap(short, long, value_name = "TRIPLE")]
     pub target: Option<String>,
 
+    /// Crates to skip the integration (space-delimited)
+    #[clap(
+        short,
+        long,
+        value_name = "CRATES",
+        require_delimiter = true,
+        value_delimiter = " "
+    )]
+    pub skip_crates: Option<Vec<String>>,
+
+    /// Enable debugging mode for the library when integrating
+    #[clap(short, long)]
+    pub debug_ci: bool,
+
     /// Use verbose output (-vv very verbose output)
     #[clap(short, long, parse(from_occurrences))]
     pub verbose: i32,
 }
 
+/// Options for `cargo-run-ci`.
 #[derive(Clap, Debug)]
 #[clap(
     name = "cargo-run-ci",
@@ -28,7 +46,7 @@ pub struct BuildArgs {
     author = clap::crate_authors!(),
     about = "Run a Compiler Interrupts-integrated binary",
 )]
-pub struct RunArgs {
+pub struct RunOpts {
     /// Run the binary in release mode
     #[clap(short, long)]
     pub release: bool,
@@ -38,7 +56,7 @@ pub struct RunArgs {
     pub target: Option<String>,
 
     /// Name of the binary
-    #[clap(short, long, value_name = "BINARY_NAME")]
+    #[clap(short, long, value_name = "BINARY")]
     pub bin: Option<String>,
 
     /// Use verbose output (-vv very verbose output)
@@ -46,6 +64,7 @@ pub struct RunArgs {
     pub verbose: i32,
 }
 
+/// Options for `cargo-lib-ci`.
 #[derive(Clap, Debug)]
 #[clap(
     name = "cargo-lib-ci",
@@ -53,20 +72,34 @@ pub struct RunArgs {
     author = clap::crate_authors!(),
     about = "Manage the Compiler Interrupts library"
 )]
-pub struct LibraryArgs {
+pub struct LibraryOpts {
     /// Install the library
-    #[clap(short, long, takes_value = false)]
+    #[clap(short, long, conflicts_with_all = &["uninstall", "update"])]
     pub install: bool,
 
     /// Uninstall the library
-    #[clap(short, long, takes_value = false)]
+    #[clap(short, long, conflicts_with_all = &["install", "update"])]
     pub uninstall: bool,
 
-    /// Set default arguments for the library
-    #[clap(short, long, allow_hyphen_values = true)]
+    /// Update the library
+    #[clap(long, conflicts_with_all = &["install", "uninstall"])]
+    pub update: bool,
+
+    /// Default arguments for the library (space-delimited)
+    #[clap(
+        short,
+        long,
+        allow_hyphen_values = true,
+        require_delimiter = true,
+        value_delimiter = " "
+    )]
     pub args: Option<Vec<String>>,
 
-    /// Path to the library when installing
+    /// URL to the source code of the library when installing
+    #[clap(long, requires = "install")]
+    pub url: Option<String>,
+
+    /// Destination path for the library when installing
     #[clap(short, long, requires = "install")]
     pub path: Option<String>,
 

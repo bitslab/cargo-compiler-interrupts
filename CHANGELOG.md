@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file. `cargo-comp
 
 #### 3.x Releases
 
+- `3.1.x` Releases - [3.1.0](#310)
 - `3.0.x` Releases - [3.0.0](#300) | [3.0.1](#301)
 
 #### 2.x Releases
@@ -17,13 +18,54 @@ All notable changes to this project will be documented in this file. `cargo-comp
 
 ---
 
+## [3.1.0](https://github.com/bitslab/cargo-compiler-interrupts/releases/tag/3.1.0)
+
+Released on 2021-07-24.
+
+#### Added
+
+- Compiler Interrupts library officially supports LLVM from 9 to 12.
+- Documentation for all public items.
+- Configuration has three new fields: Path to the debug-enabled library, checksum of the source and remote URL for the source code.
+- `cargo-build-ci`
+  - Ability to skip crates while integration by passing `--skip-crates` option.
+  - Ability to enable debugging mode when integrating by passing `--debug-ci` option.
+  - Real-time output from internal `cargo build` invocation.
+  - Progress indicator when running the integration.
+  - Linker invocations now run concurrently.
+  - Output from internal commands such as `opt` and linker is now truncated by default to prevent polluting the terminal. Passing `--debug-ci` enables full and verbose logging.
+  - When running with `--debug-ci` option, output from failed process is written to a log file instead of directly printing to the terminal. Log files can be found in the same directory with the configuration file.
+- `cargo-lib-ci`
+  - Ability to update the library by passing `--update` option.
+  - Ability to specify a remote URL to the source code of the library by passing `--url` option.
+  - Installing the library now installs both with and without debugging mode versions.
+  - File name for the library now has a checksum appended to it for versioning.
+  - Progress indicator when installing/updating the library.
+
+#### Updated
+
+- `args` module is renamed to `opts`, same for `Args` structs.
+- Using an unsupported version of LLVM will now throw an appropriate error.
+- Various helper functions are renamed.
+- `cargo-build-ci`
+  - Fix the mismatch relocation symbols error when linking on Linux by passing `--code-model=large` to `llc` instead of using `relocation-model=static`.
+- `cargo-lib-ci`
+  - Fix an ambiguous use when user passes both `--install` and `--uninstall`.
+  - Remove checking if the current directory is a valid Cargo directory.
+  - Default arguments for the library are changed.
+
+#### Removed
+
+- `cargo` module has been removed. All Cargo related functions have been moved to `ops/build`.
+- `wget` usage for fetching the source code has been removed.
+
 ## [3.0.1](https://github.com/bitslab/cargo-compiler-interrupts/releases/tag/3.0.1)
 
 Released on 2021-07-02.
 
 #### Updated
 
-- Fix the compilation error while running `cargo publish`.
+- Fix the compilation error when running `cargo publish`.
 - Version number should now be correct.
 
 ## [3.0.0](https://github.com/bitslab/cargo-compiler-interrupts/releases/tag/3.0.0)
@@ -33,7 +75,8 @@ Released on 2021-07-02.
 #### Updated
 
 - `cargo-ci` has been renamed to `cargo-compiler-interrupts`.
-- Fix the relocation error while linking on Linux.
+- `cargo-build-ci`
+  - Temporary fix to the mismatch relocation symbols error when linking on Linux by passing `relocation-model=static` to the compiler.
 
 #### Removed
 
@@ -67,22 +110,22 @@ Released on 2021-05-10.
 
 #### Added
 
-- Installing, uninstalling and display information about the CI library through `cargo-lib-ci`.
+- Installing, uninstalling and display information about the Compiler Interrupts library through `cargo-lib-ci`.
 - Running CI-integrated binaries through `cargo-run-ci`.
-- External configuration file of the CI library in `CONFIG_DIR`, which is platform dependent.
+- External configuration file for the Compiler Interrupts library is now in `CONFIG_DIR`, which is platform dependent.
 
 #### Updated
 
 - Required minimum version for dependencies has been narrowed.
-- Path to the library file is moved to `CONFIG_DIR`.
-- Running `cargo-compiler-interrupts` utilities through `cargo` subcommand.
-- Running `cargo-compiler-interrupts` utilities when current directory is not at the root directory of the package.
+- Compiler Interrupts library file is moved to `CONFIG_DIR`.
+- Ability to run the commands through `cargo`.
+- Ability to run when current directory is not at the root directory of the package.
 
 #### Removed
 
 - `build.rs` has been removed. Please use `cargo-lib-ci` to handle the library's installation.
-- `libci` has been removed. Source code for CI is available [here](https://github.com/bitslab/CompilerInterrupts). Source code will be feteched from this repository when needed.
-- Skipped crates while integrating the CI have been removed.
+- `libci` has been removed. Source code for the Compiler Interrupts is available [here](https://github.com/bitslab/CompilerInterrupts). Source code will be fetched from this repository when needed.
+- Default skipped crates while integrating the Compiler Interrupts have been removed.
 
 ---
 

@@ -1,3 +1,5 @@
+//! Miscellaneous utilities.
+
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
@@ -6,7 +8,7 @@ use tracing::{debug, info};
 
 use crate::CIResult;
 
-/// Initialize the logger.
+/// Initializes the logger.
 pub fn init_logger(verbose: i32) {
     tracing::info!("initializing logger");
     let log_level = match verbose {
@@ -22,7 +24,7 @@ pub fn init_logger(verbose: i32) {
         .init();
 }
 
-/// Get the root directory of the package.
+/// Gets the root directory of the package.
 fn package_root_dir() -> CIResult<PathBuf> {
     let output = ProcessBuilder::new("cargo")
         .arg("locate-project")
@@ -35,7 +37,7 @@ fn package_root_dir() -> CIResult<PathBuf> {
     Ok(root_dir.to_path_buf())
 }
 
-/// Set the current directory to the root directory of the package.
+/// Sets the current directory to the root directory of the package.
 pub fn set_current_package_root_dir() -> CIResult<()> {
     let mut dir = std::env::current_dir()?;
     dir.push("Cargo.toml");
@@ -50,7 +52,7 @@ pub fn set_current_package_root_dir() -> CIResult<()> {
     Ok(())
 }
 
-/// Get the path to the configuration directory.
+/// Gets the path to the configuration directory.
 pub fn config_path() -> CIResult<PathBuf> {
     let mut path = dirs::config_dir().context("failed to get config dir")?;
     path.push("cargo-compiler-interrupts");
@@ -60,8 +62,8 @@ pub fn config_path() -> CIResult<PathBuf> {
     Ok(path)
 }
 
-/// Get the directory to the target folder and concatenate with the given path.
-pub fn target_dir(target: &Option<String>, release: &bool) -> CIResult<PathBuf> {
+/// Gets the path to the target directory.
+pub fn target_path(target: &Option<String>, release: &bool) -> CIResult<PathBuf> {
     // get base target directory
     let mut dir = match std::env::var_os("CARGO_TARGET_DIR") {
         Some(dir) => dir.into(),
@@ -79,15 +81,15 @@ pub fn target_dir(target: &Option<String>, release: &bool) -> CIResult<PathBuf> 
     Ok(dir)
 }
 
-/// Scan the target directory for files matching the predicate.
-pub fn scan_dir<P: AsRef<Path>>(
-    directory: P,
+/// Scans the target directory for files matching the predicate.
+pub fn scan_path<P: AsRef<Path>>(
+    path: P,
     predicate: fn(PathBuf) -> bool,
 ) -> CIResult<Vec<PathBuf>> {
-    let directory = directory.as_ref();
-    debug!("scanning directory: {}", directory.display());
-    let mut files = vec![];
-    for entry in directory.read_dir()? {
+    let path = path.as_ref();
+    debug!("scanning path: {}", path.display());
+    let mut files = Vec::new();
+    for entry in path.read_dir()? {
         let entry = entry?;
         let path = entry.path();
         if predicate(path.clone()) {
@@ -97,7 +99,7 @@ pub fn scan_dir<P: AsRef<Path>>(
     Ok(files)
 }
 
-/// Append the suffix to the file stem of a path.
+/// Appends the suffix to the file stem of a path.
 pub fn append_suffix<P: AsRef<Path>>(path: P, suffix: &str) -> PathBuf {
     let path = path.as_ref();
     let file_stem = file_stem_unwrapped(path);
@@ -109,7 +111,7 @@ pub fn append_suffix<P: AsRef<Path>>(path: P, suffix: &str) -> PathBuf {
     path.with_file_name(file_name)
 }
 
-/// Get the file stem of a path and unwrapped by default.
+/// Gets the file stem of a path and unwrapped by default.
 pub fn file_stem_unwrapped<P: AsRef<Path>>(path: P) -> String {
     let path = path.as_ref();
     path.file_stem()
@@ -118,7 +120,7 @@ pub fn file_stem_unwrapped<P: AsRef<Path>>(path: P) -> String {
         .unwrap_or_default()
 }
 
-/// Get the file name of a path and unwrapped by default.
+/// Gets the file name of a path and unwrapped by default.
 pub fn file_name_unwrapped<P: AsRef<Path>>(path: P) -> String {
     let path = path.as_ref();
     path.file_name()
@@ -127,7 +129,7 @@ pub fn file_name_unwrapped<P: AsRef<Path>>(path: P) -> String {
         .unwrap_or_default()
 }
 
-/// Get the file extension of a path.
+/// Gets the file extension of a path.
 fn extension<P: AsRef<Path>>(path: P) -> Option<String> {
     let path = path.as_ref();
     path.extension()
@@ -140,24 +142,40 @@ pub fn extension_unwrapped<P: AsRef<Path>>(path: P) -> String {
     extension(path).unwrap_or_default()
 }
 
-/// Sanity check for LLVM toolchain and its binaries.
+/// Determines appropriate version for LLVM toolchain and its binaries.
 pub fn llvm_toolchain(binaries: &mut Vec<String>) -> CIResult<String> {
     use crate::error::CIError::*;
     use anyhow::bail;
 
-    // get rustc's llvm version
+    let llvm_min_version_supported: i32 = 9;
+
+    // get llvm version from rustc
     let output = ProcessBuilder::new("rustc").arg("-vV").exec_with_output()?;
     let rustc_output = String::from_utf8(output.stdout)?;
     let rustc_ver = rustc_output
         .lines()
         .filter_map(|line| line.strip_prefix("LLVM version: "))
         .next()
-        .expect("`rustc -vV` should have the LLVM version field")
+        .context("`rustc -vV` should have the LLVM version field")?
         .trim()
         .to_string();
-    let major_ver = rustc_ver.split(".").next().unwrap();
+    let major_ver = rustc_ver
+        .split('.')
+        .next()
+        .context("`rust version string is not valid")?;
+    let major_ver_i32 = major_ver
+        .parse::<i32>()
+        .context("`rust version string is not valid")?;
 
-    // get llvm version from both binaries with and without version suffix
+    // check if llvm version is supported
+    if major_ver_i32 < llvm_min_version_supported {
+        bail!(LLVMNotSupported(
+            major_ver.to_string(),
+            llvm_min_version_supported.to_string()
+        ));
+    }
+
+    // get llvm version from `llvm-config` with and without version suffix
     let cfg = ProcessBuilder::new("llvm-config")
         .arg("--version")
         .exec_with_output();
@@ -197,7 +215,7 @@ pub fn llvm_toolchain(binaries: &mut Vec<String>) -> CIResult<String> {
         }
     };
 
-    // add version suffix if needed to llvm's binaries
+    // add version suffix if needed to llvm binaries
     for binary in binaries {
         *binary = if add_sf {
             format!("{}-{}", binary, major_ver)
@@ -207,4 +225,15 @@ pub fn llvm_toolchain(binaries: &mut Vec<String>) -> CIResult<String> {
     }
 
     Ok(rustc_ver)
+}
+
+/// Gets human readable for duration.
+pub fn human_duration(duration: std::time::Duration) -> String {
+    let secs = duration.as_secs();
+
+    if secs >= 60 {
+        format!("{}m {:02}s", secs / 60, secs % 60)
+    } else {
+        format!("{}.{:02}s", secs, duration.subsec_nanos() / 10_000_000)
+    }
 }

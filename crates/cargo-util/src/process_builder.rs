@@ -1,6 +1,6 @@
 use crate::process_error::ProcessError;
 use crate::read2;
-use anyhow::{bail, Error, Result, Context};
+use anyhow::{bail, Context, Error, Result};
 use shell_escape::escape;
 use std::collections::BTreeMap;
 use std::env;

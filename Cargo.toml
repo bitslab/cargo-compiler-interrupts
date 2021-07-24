@@ -6,25 +6,32 @@ categories = [
 ]
 description = "Cargo subcommands that integrate the Compiler Interrupts to the package"
 edition = "2018"
-keywords = ["assembly", "llvm-ir", "plugins", "cargo", "subcommand"]
+keywords = ["plugins", "cargo", "subcommand", "llvm-ir", "interrupt"]
 license = "MIT"
 name = "cargo-compiler-interrupts"
 readme = "README.md"
 repository = "https://github.com/bitslab/cargo-compiler-interrupts"
-version = "3.0.1"
+version = "3.1.0"
 
 [dependencies]
 anyhow = "1.0"
 cargo-util = {version = "0.1.0", path = "crates/cargo-util"}
 cargo_metadata = "0.13"
+chrono = "0.4"
 clap = "3.0.0-beta.2"
+colored = "2"
 dirs = "3.0"
 faccess = "0.2"
+indicatif = "0.16"
+md5 = "0.7"
+rayon = "1.5"
 serde = {version = "1.0", features = ["derive"]}
+term_size = "1.0.0-beta.2"
 thiserror = "1.0"
 toml = "0.5"
 tracing = "0.1"
 tracing-subscriber = "0.2"
+ureq = "2.1"
 
 [[bin]]
 name = "cargo-build-ci"

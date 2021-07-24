@@ -1,16 +1,17 @@
-use cargo_compiler_interrupts::{args, ops, util, CIResult};
+use cargo_compiler_interrupts::{ops, opts, util, CIResult};
 use clap::Clap;
 
+/// Entry function of `cargo run-ci`.
 fn main() -> CIResult<()> {
-    let dargs = std::env::args().skip(1).collect::<Vec<_>>();
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
 
-    let args = args::RunArgs::parse_from(dargs);
+    let run_opts = opts::RunOpts::parse_from(args);
 
-    util::init_logger(args.verbose);
+    util::init_logger(run_opts.verbose);
 
     util::set_current_package_root_dir()?;
 
-    ops::run::exec(args)?;
+    ops::run::exec(run_opts)?;
 
     Ok(())
 }
