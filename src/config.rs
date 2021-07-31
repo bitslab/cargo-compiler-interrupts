@@ -11,26 +11,21 @@ use crate::{util, CIResult};
 pub struct Config {
     /// Path to the library.
     pub library_path: String,
-
     /// Path to the debug-enabled library.
     pub library_path_dbg: String,
-
     /// LLVM version used to compile the library.
     pub llvm_version: String,
-
     /// Default arguments.
     pub default_args: Vec<String>,
-
     /// Checksum of the source code.
     pub checksum: String,
-
     /// Remote URL for the source code.
     pub url: String,
 }
 
 impl Config {
     /// Load the configuration.
-    pub fn load() -> CIResult<Config> {
+    pub fn load() -> CIResult<Self> {
         let mut path = util::config_path()?;
         path.push("default.cfg");
         let file = match paths::read(&path) {
@@ -38,7 +33,7 @@ impl Config {
             Err(e) => {
                 info!("config file not available, default config loaded");
                 debug!("error: {}", e);
-                return Ok(Config::default());
+                return Ok(Self::default());
             }
         };
         match toml::from_str(&file) {
@@ -46,19 +41,19 @@ impl Config {
             Err(e) => {
                 let old_path = util::append_suffix(&path, "old");
                 paths::copy(&path, &old_path)?;
-                Config::save(&Config::default())?;
+                Self::save(&Self::default())?;
 
                 eprintln!("Incompatible config file found, replaced with default config");
                 eprintln!("Old config file can be found at: {}", old_path.display());
                 debug!("error: {}", e);
 
-                Config::load()
+                Self::load()
             }
         }
     }
 
     /// Save the configuration.
-    pub fn save(config: &Config) -> CIResult<()> {
+    pub fn save(config: &Self) -> CIResult<()> {
         let mut path = util::config_path()?;
         path.push("default.cfg");
         let s = toml::to_string_pretty(config)?;

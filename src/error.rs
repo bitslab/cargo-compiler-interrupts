@@ -1,4 +1,4 @@
-//! Errors related to Compiler Interrupts integration.
+//! Errors related to the Compiler Interrupts integration.
 
 // thiserror's bug
 #![allow(clippy::nonstandard_macro_braces)]

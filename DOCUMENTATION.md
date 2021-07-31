@@ -50,6 +50,7 @@ FLAGS:
     -V, --version     Prints version information
 
 OPTIONS:
+    -e, --example <BINARY>           Build an example artifact
     -s, --skip-crates <CRATES>...    Crates to skip the integration (space-delimited)
     -t, --target <TRIPLE>            Build for the target triple
 ```
@@ -68,6 +69,7 @@ FLAGS:
     -V, --version    Prints version information
 
 OPTIONS:
+    -a, --args <ARGS>...     Arguments for the binary
     -b, --bin <BINARY>       Name of the binary
     -t, --target <TRIPLE>    Target triple for the binary
 ```
@@ -88,9 +90,9 @@ FLAGS:
     -V, --version      Prints version information
 
 OPTIONS:
-    -a, --args <args>...    Default arguments for the library (space-delimited)
-    -p, --path <path>       Destination path for the library when installing
-        --url <url>         URL to the source code of the library when installing
+    -a, --args <ARGS>...    Default arguments for the library (space-delimited)
+    -p, --path <PATH>       Destination path for the library when installing
+        --url <URL>         Remote URL to the source code of the library when installing
 ```
 
 ## Project structure

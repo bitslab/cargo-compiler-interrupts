@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file. `cargo-comp
 
 #### 3.x Releases
 
+- `3.2.x` Releases - [3.2.0](#320)
 - `3.1.x` Releases - [3.1.0](#310)
 - `3.0.x` Releases - [3.0.0](#300) | [3.0.1](#301)
 
@@ -17,6 +18,30 @@ All notable changes to this project will be documented in this file. `cargo-comp
 - `1.0.x` Releases - [1.0.0](#100)
 
 ---
+
+## [3.2.0](https://github.com/bitslab/cargo-compiler-interrupts/releases/tag/3.2.0)
+
+Released on 2021-07-31.
+
+#### Added
+
+- `cargo-build-ci`
+  - Support integration for `examples` target by passing `--example` option.
+- `cargo-run-ci`
+  - Ability to pass arguments to the binary by passing `--args` option.
+
+#### Updated
+
+- Various path-related helper functions are renamed.
+- `cargo-build-ci`
+  - Fix a race condition between integration threads and progress indicator threads when integration thread failed unexpectedly.
+  - Failed integration can now be run again without using `cargo clean`.
+- `cargo-lib-ci`
+  - Fix wrong output formatting while the progress indicator is showing.
+
+#### Removed
+
+- `deps-ci` folder has been removed. All CI-integrated artifacts are now resided in the same directory as the original one.
 
 ## [3.1.0](https://github.com/bitslab/cargo-compiler-interrupts/releases/tag/3.1.0)
 

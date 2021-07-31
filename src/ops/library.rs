@@ -1,4 +1,4 @@
-//! Implementation of `cargo lib-ci` subcommand.
+//! Implementation of `cargo-lib-ci`.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -54,30 +54,29 @@ fn install(mut config: Config, opts: LibraryOpts, update: bool) -> CIResult<()> 
         .template("{spinner:.dim.bold} {prefix:>10.cyan.bold} {wide_msg}");
     pb.enable_steady_tick(200);
     pb.set_style(ps);
-    if !update {
-        pb.set_prefix("Installing");
-    } else {
+    if update {
         pb.set_prefix("Updating");
+    } else {
+        pb.set_prefix("Installing");
     }
 
-    if !update {
-        pb.set_message("Fetching the source code");
-    } else {
+    if update {
         pb.set_message("Checking for update");
+    } else {
+        pb.set_message("Fetching the source code");
     }
 
     // fetch the source code
     let mut src_path = std::env::temp_dir();
     src_path.push("CompilerInterrupt.cpp");
-    let src_path = src_path.to_str().expect("path is not valid utf-8");
-    info!("src_path: {}", src_path);
+    info!("src_path: {}", src_path.display());
 
-    let url = if !update {
+    let url = if update {
+        config.url.clone()
+    } else {
         let default_url = "https://raw.githubusercontent.com/bitslab/\
             CompilerInterrupts/main/src/CompilerInterrupt.cpp";
         opts.url.unwrap_or_else(|| default_url.to_string())
-    } else {
-        config.url.clone()
     };
     let resp = ureq::get(&url).call()?;
     let len = resp
@@ -144,8 +143,6 @@ fn install(mut config: Config, opts: LibraryOpts, update: bool) -> CIResult<()> 
         _ => "",
     };
 
-    pb.set_message("Compiling the Compiler Interrupts library");
-
     info!("getting the destination library path");
     let file_name = format!("CompilerInterrupt-{:x}.so", digest);
     let lib_path = {
@@ -169,19 +166,16 @@ fn install(mut config: Config, opts: LibraryOpts, update: bool) -> CIResult<()> 
             path
         }
     };
-    let lib_path_dbg = util::append_suffix(&lib_path, "dbg")
-        .into_os_string()
-        .into_string()
-        .expect("path is not valid utf-8");
-    let lib_path = lib_path
-        .into_os_string()
-        .into_string()
-        .expect("path is not valid utf-8");
-    info!("lib_path: {}", lib_path);
+    info!("lib_path: {}", lib_path.display());
+
+    let lib_path = util::path_to_string(&lib_path);
+    let lib_path_dbg = util::path_to_string(util::append_suffix(&lib_path, "dbg"));
+
+    pb.set_message("Compiling the Compiler Interrupts library");
 
     // compile
-    info!("preparing to compile");
     let mut clang = ProcessBuilder::new(clang);
+    clang.arg("-fdiagnostics-color=always");
     clang.arg(src_path);
     clang.arg(llvm_version_macro);
     clang.args(&so_flags.split_ascii_whitespace().collect::<Vec<_>>());
@@ -191,17 +185,41 @@ fn install(mut config: Config, opts: LibraryOpts, update: bool) -> CIResult<()> 
     debug!("clang_base_args: {:?}", clang.get_args());
 
     let mut clang_dbg = clang.clone();
-    clang_dbg.arg("-DDBG_DETAILED");
-    clang_dbg.args(&["-o".to_string(), lib_path_dbg.to_string()]);
 
     info!("compiling the library");
-    clang.args(&["-o".to_string(), lib_path.to_string()]);
-    clang.exec().context("failed to compile the library")?;
+    clang.args(&["-o".to_string(), lib_path.clone()]);
+    clang
+        .exec_with_streaming(
+            &mut |out| {
+                pb.println(out);
+                Ok(())
+            },
+            &mut |err| {
+                pb.println(err);
+                Ok(())
+            },
+            false,
+        )
+        .context("Failed to compile the library")?;
 
     info!("compiling the library with debugging mode");
+    pb.set_message("Compiling the Compiler Interrupts library with debugging mode");
+
+    clang_dbg.arg("-DDBG_DETAILED");
+    clang_dbg.args(&["-o".to_string(), lib_path_dbg.clone()]);
     clang_dbg
-        .exec()
-        .context("failed to compile the library with debugging mode")?;
+        .exec_with_streaming(
+            &mut |out| {
+                pb.println(out);
+                Ok(())
+            },
+            &mut |err| {
+                pb.println(err);
+                Ok(())
+            },
+            false,
+        )
+        .context("Failed to compile the library with debugging mode")?;
 
     // update config
     info!("updating configuration");
@@ -210,7 +228,7 @@ fn install(mut config: Config, opts: LibraryOpts, update: bool) -> CIResult<()> 
         .map(|&s| s.to_string())
         .collect();
 
-    config.library_path = lib_path.to_string();
+    config.library_path = lib_path.clone();
     config.library_path_dbg = lib_path_dbg;
     config.llvm_version = llvm_version;
     config.checksum = checksum;
@@ -221,7 +239,7 @@ fn install(mut config: Config, opts: LibraryOpts, update: bool) -> CIResult<()> 
 
     if let Err(e) = Config::save(&config).context("failed to save the configuration") {
         // try to remove the library
-        paths::remove_file(lib_path)?;
+        paths::remove_file(&lib_path)?;
         return Err(e);
     }
 
@@ -261,6 +279,10 @@ fn uninstall(config: Config) -> CIResult<()> {
 
 /// Sets the default arguments for the library.
 fn set_default_args(mut config: Config, default_args: Vec<String>) -> CIResult<()> {
+    if !Path::new(&config.library_path).is_file() {
+        bail!(CIError::LibraryNotInstalled)
+    }
+
     config.default_args = default_args;
     Config::save(&config).context("failed to save the configuration")?;
 

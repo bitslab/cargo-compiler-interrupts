@@ -2,10 +2,11 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Context;
+use anyhow::{bail, Context};
 use cargo_util::{paths, ProcessBuilder};
 use tracing::{debug, info};
 
+use crate::error::CIError::*;
 use crate::CIResult;
 
 /// Initializes the logger.
@@ -26,10 +27,11 @@ pub fn init_logger(verbose: i32) {
 
 /// Gets the root directory of the package.
 fn package_root_dir() -> CIResult<PathBuf> {
-    let output = ProcessBuilder::new("cargo")
-        .arg("locate-project")
-        .arg("--message-format=plain")
-        .exec_with_output()?;
+    let mut cmd = ProcessBuilder::new("cargo");
+    cmd.arg("locate-project");
+    cmd.arg("--message-format=plain");
+    cmd.env("CARGO_TERM_COLOR", "always");
+    let output = cmd.exec_with_output()?;
     let stdout = String::from_utf8(output.stdout)?;
     let path_toml = Path::new(&stdout);
     let root_dir = path_toml.parent().context("failed to get parent dir")?;
@@ -102,17 +104,18 @@ pub fn scan_path<P: AsRef<Path>>(
 /// Appends the suffix to the file stem of a path.
 pub fn append_suffix<P: AsRef<Path>>(path: P, suffix: &str) -> PathBuf {
     let path = path.as_ref();
-    let file_stem = file_stem_unwrapped(path);
-    let extension = extension(path);
-    let file_name = match extension {
-        Some(extension) => format!("{}-{}.{}", file_stem, suffix, extension),
-        None => format!("{}-{}", file_stem, suffix),
+    let file_stem = file_stem(path);
+    let extension = _extension(path);
+    let file_name = if let Some(extension) = extension {
+        format!("{}-{}.{}", file_stem, suffix, extension)
+    } else {
+        format!("{}-{}", file_stem, suffix)
     };
     path.with_file_name(file_name)
 }
 
-/// Gets the file stem of a path and unwrapped by default.
-pub fn file_stem_unwrapped<P: AsRef<Path>>(path: P) -> String {
+/// Gets the file stem of a path. Empty string is returned if path was not valid UTF-8.
+pub fn file_stem<P: AsRef<Path>>(path: P) -> String {
     let path = path.as_ref();
     path.file_stem()
         .map(std::ffi::OsStr::to_string_lossy)
@@ -120,8 +123,8 @@ pub fn file_stem_unwrapped<P: AsRef<Path>>(path: P) -> String {
         .unwrap_or_default()
 }
 
-/// Gets the file name of a path and unwrapped by default.
-pub fn file_name_unwrapped<P: AsRef<Path>>(path: P) -> String {
+/// Gets the file name of a path. Empty string is returned if path was not valid UTF-8.
+pub fn file_name<P: AsRef<Path>>(path: P) -> String {
     let path = path.as_ref();
     path.file_name()
         .map(std::ffi::OsStr::to_string_lossy)
@@ -129,24 +132,27 @@ pub fn file_name_unwrapped<P: AsRef<Path>>(path: P) -> String {
         .unwrap_or_default()
 }
 
+/// Get the file extension of a path. Empty string is returned if path was not valid UTF-8.
+pub fn extension<P: AsRef<Path>>(path: P) -> String {
+    _extension(path).unwrap_or_default()
+}
+
 /// Gets the file extension of a path.
-fn extension<P: AsRef<Path>>(path: P) -> Option<String> {
+fn _extension<P: AsRef<Path>>(path: P) -> Option<String> {
     let path = path.as_ref();
     path.extension()
         .map(std::ffi::OsStr::to_string_lossy)
         .map(|e| e.to_string())
 }
 
-/// Get the file extension of a path and unwrapped by default.
-pub fn extension_unwrapped<P: AsRef<Path>>(path: P) -> String {
-    extension(path).unwrap_or_default()
+/// Converts a path to string. Empty string is returned if path was not valid UTF-8.
+pub fn path_to_string<P: AsRef<Path>>(path: P) -> String {
+    let path = path.as_ref();
+    path.to_str().unwrap_or_default().to_string()
 }
 
 /// Determines appropriate version for LLVM toolchain and its binaries.
 pub fn llvm_toolchain(binaries: &mut Vec<String>) -> CIResult<String> {
-    use crate::error::CIError::*;
-    use anyhow::bail;
-
     let llvm_min_version_supported: i32 = 9;
 
     // get llvm version from rustc
@@ -154,18 +160,17 @@ pub fn llvm_toolchain(binaries: &mut Vec<String>) -> CIResult<String> {
     let rustc_output = String::from_utf8(output.stdout)?;
     let rustc_ver = rustc_output
         .lines()
-        .filter_map(|line| line.strip_prefix("LLVM version: "))
-        .next()
+        .find_map(|line| line.strip_prefix("LLVM version: "))
         .context("`rustc -vV` should have the LLVM version field")?
         .trim()
         .to_string();
     let major_ver = rustc_ver
         .split('.')
         .next()
-        .context("`rust version string is not valid")?;
+        .context("`rustc` llvm version is not valid")?;
     let major_ver_i32 = major_ver
         .parse::<i32>()
-        .context("`rust version string is not valid")?;
+        .context("`rustc` llvm version is not valid")?;
 
     // check if llvm version is supported
     if major_ver_i32 < llvm_min_version_supported {
@@ -220,7 +225,7 @@ pub fn llvm_toolchain(binaries: &mut Vec<String>) -> CIResult<String> {
         *binary = if add_sf {
             format!("{}-{}", binary, major_ver)
         } else {
-            binary.to_string()
+            (*binary).to_string()
         }
     }
 
