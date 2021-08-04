@@ -164,7 +164,7 @@ pub fn write<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) -> Result<()>
         .with_context(|| format!("failed to write `{}`", path.display()))
 }
 
-/// Equivalent to [`write`], but does not write anything if the file contents
+/// Equivalent to [`write()`], but does not write anything if the file contents
 /// are identical to the given contents.
 pub fn write_if_changed<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) -> Result<()> {
     (|| -> Result<()> {
@@ -635,7 +635,7 @@ pub fn create_dir_all_excluded_from_backups_atomic<P: AsRef<Path>>(p: P) -> Resu
     let parent = path.parent().unwrap();
     let base = path.file_name().unwrap();
     create_dir_all(parent)?;
-    // We do this in two steps (first create a temporary directory and exlucde
+    // We do this in two steps (first create a temporary directory and exclude
     // it from backups, then rename it to the desired name. If we created the
     // directory directly where it should be and then excluded it from backups
     // we would risk a situation where cargo is interrupted right after the directory
@@ -653,7 +653,7 @@ pub fn create_dir_all_excluded_from_backups_atomic<P: AsRef<Path>>(p: P) -> Resu
     // here to create the directory directly and fs::create_dir_all() explicitly treats
     // the directory being created concurrently by another thread or process as success,
     // hence the check below to follow the existing behavior. If we get an error at
-    // rename() and suddently the directory (which didn't exist a moment earlier) exists
+    // rename() and suddenly the directory (which didn't exist a moment earlier) exists
     // we can infer from it it's another cargo process doing work.
     if let Err(e) = fs::rename(tempdir.path(), path) {
         if !path.exists() {

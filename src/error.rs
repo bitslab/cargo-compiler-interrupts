@@ -21,14 +21,22 @@ pub enum CIError {
         Path to the library: {0}\n\
         Run `cargo lib-ci --update` to update the library if needed"
     )]
-    LibraryAlreadyInstalled(String),
+    LibraryAlreadyInstalled(
+        /// Path to the library.
+        String,
+    ),
 
     /// LLVM version between Rust and LLVM toolchain does not match.
     #[error(
         "LLVM version from Rust toolchain ({0}) does not match with the\
         LLVM version from LLVM toolchain ({1})"
     )]
-    LLVMVersionNotMatch(String, String),
+    LLVMVersionNotMatch(
+        /// LLVM version from Rust toolchain.
+        String,
+        /// LLVM version from LLVM toolchain.
+        String,
+    ),
 
     /// LLVM toolchain is not installed.
     #[error(
@@ -39,14 +47,24 @@ pub enum CIError {
 
     /// LLVM version is not supported.
     #[error("LLVM version {0} is not supported. Minimum supported LLVM version is {1}")]
-    LLVMNotSupported(String, String),
+    LLVMNotSupported(
+        /// LLVM version.
+        String,
+        /// Minimum supported LLVM version
+        String,
+    ),
 
     /// Binary is not available.
     #[error(
         "Failed to execute the binary '{0}'\n\
         Available binaries: {1}"
     )]
-    BinaryNotAvailable(String, String),
+    BinaryNotAvailable(
+        /// Name of the unavailable binary.
+        String,
+        /// List of available binaries.
+        String,
+    ),
 
     /// Package does not have any available binaries.
     #[error("Package does not have any available binaries")]
@@ -58,9 +76,15 @@ pub enum CIError {
         Run `cargo run-ci --bin <BINARY_NAME>` to specify a binary\n\
         Available binaries: {0}"
     )]
-    BinaryNotDetermine(String),
+    BinaryNotDetermine(
+        /// List of available binaries.
+        String,
+    ),
 
     /// Path is not a valid directory.
     #[error("Given path is not a valid directory: {0}")]
-    PathNotDirectory(String),
+    PathNotDirectory(
+        /// Given path.
+        String,
+    ),
 }

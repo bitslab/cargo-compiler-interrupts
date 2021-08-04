@@ -91,7 +91,7 @@ fn _exec(config: &Config, opts: &BuildOpts) -> CIResult<()> {
     let ar = &llvm_bins[2];
     let nm = &llvm_bins[3];
 
-    // get binary names
+    // get all binary-type crate names, including examples
     let mut crate_names = Vec::new();
     let metadata = cargo_metadata()?;
     for package in metadata.packages {
@@ -237,42 +237,32 @@ fn _exec(config: &Config, opts: &BuildOpts) -> CIResult<()> {
         });
     }
 
-    let term_size = term_size::dimensions().unwrap_or((80, 24));
-    debug!("term_size: {:?}", term_size);
-
-    // progress bar
+    // total length of the process bar
     let len = ll_files.len() * 2 + linkers.len() + 1;
-    let pb = if opts.verbose == 0 {
-        ProgressBar::new(len as u64)
-    } else {
-        ProgressBar::hidden()
-    };
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template(if term_size.0 > 80 {
-                "{prefix:>12.cyan.bold} [{bar:27}] {pos}/{len}: {wide_msg}"
-            } else {
-                "{prefix:>12.cyan.bold} {pos}/{len}: {wide_msg}"
-            })
-            .progress_chars("=> "),
-    );
-    pb.set_prefix("Building");
 
-    let opts = &opts;
-    let config = &config;
     let crate_names = &crate_names;
     let deps_path = &deps_path;
-
-    let num_cpus = num_cpus::get();
 
     let ll_iter = Arc::new(Mutex::new(ll_files.iter()));
     let lk_iter = Arc::new(Mutex::new(linkers.iter_mut()));
 
     thread::scope(move |s| -> CIResult<()> {
+        // communication between the progress bar thread and integration threads
         let (tx, rx) = mpsc::channel::<IntegrationCx>();
+
+        // number of threads based on number of logical cores in CPU
+        let num_cpus = num_cpus::get();
 
         // handle progress bar rendering
         let pb_thread = s.spawn(move |_| {
+            // progress bar
+            let pb = if opts.verbose == 0 {
+                ProgressBar::new(len as u64)
+            } else {
+                ProgressBar::hidden()
+            };
+            pb.set_prefix("Building");
+
             let mut names: Vec<String> = Vec::new();
             let mut error = false;
 
@@ -345,9 +335,16 @@ fn _exec(config: &Config, opts: &BuildOpts) -> CIResult<()> {
                     }
                 }
 
-                // processing crates message
-                let term_size = term_size::dimensions().unwrap_or((80, 24));
+                // progress bar message
+                let term_size = terminal_size::terminal_size()
+                    .map(|(w, h)| (w.0.into(), h.0.into()))
+                    .unwrap_or((80, 24));
                 let prefix_size = if term_size.0 > 80 { 50 } else { 20 };
+                let template = if term_size.0 > 80 {
+                    "{prefix:>12.cyan.bold} [{bar:27}] {pos}/{len}: {wide_msg}"
+                } else {
+                    "{prefix:>12.cyan.bold} {pos}/{len}: {wide_msg}"
+                };
                 let mut msg = String::new();
                 let mut iter = names.iter();
                 let first = match iter.next() {
@@ -365,6 +362,11 @@ fn _exec(config: &Config, opts: &BuildOpts) -> CIResult<()> {
                         break;
                     }
                 }
+                pb.set_style(
+                    ProgressStyle::default_bar()
+                        .template(template)
+                        .progress_chars("=> "),
+                );
                 pb.set_message(msg);
             }
 
@@ -496,7 +498,7 @@ fn _exec(config: &Config, opts: &BuildOpts) -> CIResult<()> {
             let iter = Arc::clone(&lk_iter);
             let thread = s.spawn(move |_| -> CIResult<()> {
                 loop {
-                    let linker = iter.lock().expect("mutex failed").next();
+                    let linker = iter.lock().expect("failed to acquire lock").next();
                     if let Some(linker) = linker {
                         let crate_name = Arc::new(crate_name(&linker.bin_path));
                         info!("linking: {}", crate_name);
@@ -515,7 +517,7 @@ fn _exec(config: &Config, opts: &BuildOpts) -> CIResult<()> {
                             if stdout.contains("__rust_alloc") {
                                 debug!("found allocator shim: {}", file);
                             } else {
-                                *file = util::append_suffix(&file, "ci").display().to_string();
+                                *file = util::path_to_string(util::append_suffix(&file, "ci"));
                             }
                         }
                         let deps_rlib_files = linker
@@ -651,10 +653,12 @@ fn handle_output<P: AsRef<Path>>(
             // take last few output lines to not polluting the terminal
             let mut desc = proc_err.desc.lines().rev().take(10).collect::<Vec<_>>();
             desc.reverse();
+            out.push("(truncated)");
             out.append(&mut desc);
             let msg = if debug {
-                // set log file name
                 let desc = &proc_err.desc;
+
+                // set log file name
                 let digest = md5::compute(desc.as_bytes());
                 let date = chrono::Local::now().format("%y%m%dT%H%M%S").to_string();
                 let mut path = util::config_path()?;

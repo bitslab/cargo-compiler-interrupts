@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file. `cargo-comp
 
 #### 3.x Releases
 
-- `3.2.x` Releases - [3.2.0](#320)
+- `3.2.x` Releases - [3.2.0](#320) | [3.2.1](#321)
 - `3.1.x` Releases - [3.1.0](#310)
 - `3.0.x` Releases - [3.0.0](#300) | [3.0.1](#301)
 
@@ -18,6 +18,16 @@ All notable changes to this project will be documented in this file. `cargo-comp
 - `1.0.x` Releases - [1.0.0](#100)
 
 ---
+
+## [3.2.1](https://github.com/bitslab/cargo-compiler-interrupts/releases/tag/3.2.1)
+
+Released on 2021-08-04.
+
+#### Updated
+
+- Documentation and dependencies.
+- `cargo-build-ci`
+  - Progress indicator is more aware of terminal size changes.
 
 ## [3.2.0](https://github.com/bitslab/cargo-compiler-interrupts/releases/tag/3.2.0)
 
@@ -34,7 +44,7 @@ Released on 2021-07-31.
 
 - Various path-related helper functions are renamed.
 - `cargo-build-ci`
-  - Fix a race condition between integration threads and progress indicator threads when integration thread failed unexpectedly.
+  - Fix a race condition between integration threads and progress indicator thread when integration thread failed unexpectedly.
   - Failed integration can now be run again without using `cargo clean`.
 - `cargo-lib-ci`
   - Fix wrong output formatting while the progress indicator is showing.
