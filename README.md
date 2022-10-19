@@ -11,7 +11,7 @@ Check out the Compiler Interrupts [main repository][compiler-interrupts] for mor
 ## Requirements
 
 * [Rust 1.45.0][rust] or later and [LLVM 9][llvm] or later are required.
-Both must have the same LLVM version.
+Both must have the same LLVM major version.
 * You can check the LLVM version from Rust toolchain and LLVM toolchain by running `rustc -vV`
 and `llvm-config --version` respectively.
 * x86-64 architecture with Linux or macOS is highly recommended.
@@ -32,26 +32,34 @@ git clone https://github.com/bitslab/cargo-compiler-interrupts
 cargo install --path ./cargo-compiler-interrupts
 ```
 
-## Getting started
-
-`cargo-compiler-interrupts` provides three subcommands:
+Install the Compiler Interrupts library.
 
 ``` sh
-cargo lib-ci --install    # install the CI library
-cargo build-ci            # build and integrate CI to the binary
-cargo run-ci              # run the CI-integrated binary
+cargo-lib-ci install
 ```
 
-* `cargo lib-ci` — manage the Compiler Interrupts library.
-* `cargo build-ci` — build and integrate the Compiler Interrupts to the package.
-* `cargo run-ci` — run the integrated binary.
+## Getting started
+
+### Commands
+
+* `cargo-lib-ci` — manage the Compiler Interrupts library.
+* `cargo-build-ci` — build and integrate the Compiler Interrupts to the package.
+* `cargo-run-ci` — run the integrated binary.
 You can specify which binary to run by passing `--bin <BINARY>`.
 
-Run `cargo lib-ci --install` to install the Compiler Interrupts library first.
-Before running `cargo build-ci`, add the Compiler Interrupts API package as the dependency for
-your Cargo package and registers the Compiler Interrupts handler in your program.
+``` sh
+cargo-lib-ci install    # install the CI library
+cargo-build-ci          # build and integrate CI to the binary
+cargo-run-ci            # run the CI-integrated binary
+```
+
+### Integration
+
+* Run `cargo-lib-ci install` to install the Compiler Interrupts library first.
+* Before running `cargo-build-ci`, add the Compiler Interrupts API package as the dependency for
+your Rust program and registers the Compiler Interrupts handler.
 Compiler Interrupts API is provided through the [`compiler-interrupts`][compiler-interrupts-rs]
-package.
+crate.
 
 ``` rust
 fn interrupt_handler(ic: i64) {

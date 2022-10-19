@@ -8,7 +8,7 @@ Since [Compiler Interrupts](https://dl.acm.org/doi/10.1145/3453483.3454107) is a
 
 ## Integration
 
-* If the library hasn't been installed yet, run `cargo lib-ci --install` to install the library first. Make sure you have Rust and LLVM toolchain installed.
+* If the library hasn't been installed yet, run `cargo-lib-ci install` to install the library first. Make sure you have Rust and LLVM toolchain installed.
 * Register the Compiler Interrupts handler in your program. Compiler Interrupts APIs are provided through the [`compiler-interrupts`](https://github.com/bitslab/compiler-interrupts-rs) package. You can check out the [`ci-demo`](https://github.com/bitslab/compiler-interrupts-rs/tree/master/ci-demo) in the `compiler-interrupts` package for more detailed usages.
 
 ``` rust
@@ -28,110 +28,62 @@ fn main() {
 }
 ```
 
-* Run `cargo build-ci` to start the compilation and integration processes.
-* Run `cargo run-ci` to run the CI-integrated binary.
+* Run `cargo-build-ci` to start the compilation and integration processes.
+* Run `cargo-run-ci` to run the CI-integrated binary.
 
 ## Options
 
-`cargo-compiler-interrupts` provides three subcommands:
+`cargo-compiler-interrupts` provides three binaries:
 
-``` sh
-cargo-build-ci
+```
 Compile and integrate the Compiler Interrupts to a package
 
-USAGE:
-    build-ci [FLAGS] [OPTIONS]
+Usage: cargo-build-ci [OPTIONS] [-- <CARGO_BUILD_ARGS>...]
 
-FLAGS:
-    -d, --debug-ci    Enable debugging mode for the library when integrating
-    -h, --help        Prints help information
-    -r, --release     Build artifacts in release mode
-    -v, --verbose     Use verbose output (-vv very verbose output)
-    -V, --version     Prints version information
+Arguments:
+  [CARGO_BUILD_ARGS]...  Arguments for `cargo` invocation
 
-OPTIONS:
-    -e, --example <BINARY>           Build an example artifact
-    -s, --skip-crates <CRATES>...    Crates to skip the integration (space-delimited)
-    -t, --target <TRIPLE>            Build for the target triple
+Options:
+      --skip <CRATES>  Crates to skip the integration (space-delimited)
+      --debug          Enable debugging mode for Compiler Interrupts library
+      --log <LEVEL>    Log level [default: warn] [possible values: trace, debug, info, warn, error]
+  -h, --help           Print help information
+  -V, --version        Print version information
 ```
 
-``` sh
-cargo-run-ci
+```
 Run a Compiler Interrupts-integrated binary
 
-USAGE:
-    run-ci [FLAGS] [OPTIONS]
+Usage: cargo-run-ci [OPTIONS] [-- <ARGS>...] [-- <CARGO_RUN_ARGS>...]
 
-FLAGS:
-    -h, --help       Prints help information
-    -r, --release    Run the binary in release mode
-    -v, --verbose    Use verbose output (-vv very verbose output)
-    -V, --version    Prints version information
+Arguments:
+  [ARGS]...            Arguments for the binary
+  [CARGO_RUN_ARGS]...  Arguments for `cargo` invocation
 
-OPTIONS:
-    -a, --args <ARGS>...     Arguments for the binary
-    -b, --bin <BINARY>       Name of the binary
-    -t, --target <TRIPLE>    Target triple for the binary
+Options:
+      --bin <NAME>   Name of the binary
+      --log <LEVEL>  Log level [default: warn] [possible values: trace, debug, info, warn, error]
+  -h, --help         Print help information
+  -V, --version      Print version information
 ```
 
-``` sh
-cargo lib-ci
+```
 Manage the Compiler Interrupts library
 
-USAGE:
-    lib-ci [FLAGS] [OPTIONS]
+Usage: cargo-lib-ci [OPTIONS] [COMMAND]
 
-FLAGS:
-    -h, --help         Prints help information
-    -i, --install      Install the library
-    -u, --uninstall    Uninstall the library
-        --update       Update the library
-    -v, --verbose      Use verbose output (-vv very verbose output)
-    -V, --version      Prints version information
+Commands:
+  install    Install the Compiler Interrupts library
+  uninstall  Uninstall the Compiler Interrupts library
+  update     Update the Compiler Interrupts library
+  config     Configure the Compiler Interrupts library
+  help       Print this message or the help of the given subcommand(s)
 
-OPTIONS:
-    -a, --args <ARGS>...    Default arguments for the library (space-delimited)
-    -p, --path <PATH>       Destination path for the library when installing
-        --url <URL>         Remote URL to the source code of the library when installing
+Options:
+      --log <LEVEL>  Log level [default: warn] [possible values: trace, debug, info, warn, error]
+  -h, --help         Print help information
+  -V, --version      Print version information
 ```
-
-## Project structure
-
-`cargo-compiler-interrupts` has the following project structure, some files are omitted for brevity.
-
-``` sh
-├── Cargo.toml
-├── crates
-│   └── cargo-util
-└── src
-    ├── bin
-    │   ├── build.rs
-    │   ├── library.rs
-    │   └── run.rs
-    ├── ops
-    │   ├── build.rs
-    │   ├── library.rs
-    │   ├── mod.rs
-    │   └── run.rs
-    ├── config.rs
-    ├── error.rs
-    ├── lib.rs
-    ├── opts.rs
-    └── util.rs
-```
-
-## What are those files?
-
-* Root directory
-  * `Cargo.toml` is the manifest file that contains the configuration of the package.
-  * `crates` directory contains local external dependencies. For now, it only has a fork of `cargo-util` from `cargo`.
-* `src` directory
-  * `config.rs` — handles library configuration.
-  * `error.rs` — defines error types.
-  * `opts.rs` — handles the CLI options.
-  * `util.rs` — helper functions.
-  * `bin` directory — entry function of subcommands.
-  * `ops` directory — main routine of subcommands.
 
 ## How does it work?
 

@@ -1,57 +1,70 @@
 //! Implementation of `cargo-run-ci`.
 
-use anyhow::bail;
+use anyhow::{bail, Context};
 use cargo_util::ProcessBuilder;
-use faccess::PathExt;
+use clap::Parser;
+use std::path::PathBuf;
 
-use crate::error::CIError;
-use crate::opts::RunOpts;
-use crate::{util, CIResult};
+use crate::args::RunArgs;
+use crate::error::Error;
+use crate::paths::PathExt;
+use crate::{cargo, util, CIResult, RUN_CI_BIN_NAME};
 
 /// Main routine for `cargo-run-ci`.
-pub fn exec(opts: RunOpts) -> CIResult<()> {
-    let deps_path = util::target_path(&opts.target, &opts.release)?;
-    let binary_paths = util::scan_path(&deps_path, |path| {
-        path.executable() && path.is_file() && util::file_stem(path).contains("-ci")
-    })?;
-    if binary_paths.is_empty() {
-        bail!(CIError::BinaryNotFound);
+pub fn exec() -> CIResult<()> {
+    let args = if std::env::args().next().unwrap_or_default() == RUN_CI_BIN_NAME {
+        RunArgs::parse()
+    } else {
+        RunArgs::parse_from(std::env::args().skip(1))
+    };
+
+    util::init_logger(&args.log_level)?;
+    util::set_current_workspace_root_dir().context("failed to set the root directory")?;
+
+    _exec(args)
+}
+
+/// Core routine for `cargo-run-ci`.
+fn _exec(args: RunArgs) -> CIResult<()> {
+    let mut cargo = cargo::Cargo::with_args(args.cargo_args);
+    cargo.build()?;
+
+    let binaries = cargo.target_dir.read_dir(|path| path.executable())?;
+
+    let (integrates, originals): (Vec<PathBuf>, _) = binaries
+        .into_iter()
+        .partition(|binary| binary.file_stem().unwrap_or_default().contains("-ci"));
+
+    if originals.is_empty() {
+        bail!(Error::BinaryNotFound);
     }
 
-    let binary_names = binary_paths
+    if integrates.is_empty() {
+        bail!(Error::IntegratedBinaryNotFound);
+    }
+
+    let names = originals
         .iter()
-        .map(util::file_stem)
-        .map(|mut path| {
-            remove_ci(&mut path);
-            path
-        })
+        .map(|p| p.file_stem())
+        .filter_map(|p| p.ok())
         .collect::<Vec<_>>()
         .join(", ");
 
-    if let Some(binary_name) = opts.bin {
-        for path in binary_paths {
-            let mut name = util::file_name(&path);
-            remove_ci(&mut name);
-            if binary_name == name {
-                return ProcessBuilder::new(&path)
-                    .args(&opts.args.unwrap_or_default())
+    if let Some(binary_name) = args.binary_name {
+        for (integrated, original) in integrates.iter().zip(originals.iter()) {
+            if binary_name == original.file_name()? {
+                return ProcessBuilder::new(integrated)
+                    .args(&args.binary_args)
                     .exec_replace();
             }
         }
 
-        bail!(CIError::BinaryNotAvailable(binary_name, binary_names));
-    } else if binary_paths.len() == 1 {
-        return ProcessBuilder::new(&binary_paths[0])
-            .args(&opts.args.unwrap_or_default())
+        bail!(Error::BinaryNotAvailable(binary_name, names));
+    } else if integrates.len() == 1 {
+        return ProcessBuilder::new(&integrates[0])
+            .args(&args.binary_args)
             .exec_replace();
     }
 
-    bail!(CIError::BinaryNotDetermine(binary_names));
-}
-
-/// Remove suffix "-ci" from the given string.
-fn remove_ci(s: &mut String) {
-    s.pop();
-    s.pop();
-    s.pop();
+    bail!(Error::BinaryNotDetermine(names));
 }

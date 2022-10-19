@@ -8,12 +8,13 @@
 //!
 //! ## Requirements
 //!
-//! * [Rust 1.45.0][rust] or later and [LLVM 9][llvm] or later are required.
+//! * [Rust 1.45.0 - 1.64.0][rust] and [LLVM 9 - 14][llvm] are required. 
 //! Both must have the same LLVM version.
-//! * You can check the LLVM version from Rust toolchain and LLVM toolchain by running `rustc -vV`
+//! Later LLVM versions are currently not supported due to the new LLVM pass manager.
+//! * You can check the LLVM version from Rust and LLVM toolchains by running `rustc -vV`
 //! and `llvm-config --version` respectively.
 //! * x86-64 architecture with Linux or macOS is highly recommended.
-//! Other architectures and platforms have not been tested.
+//! Other architectures and platforms have not been tested and not guaranteed to work.
 //!
 //! ## Installation
 //!
@@ -23,7 +24,7 @@
 //! cargo install cargo-compiler-interrupts
 //! ```
 //!
-//! You can also fetch the repo and install  using `--path`.
+//! You can also fetch the repo and install using `--path`.
 //!
 //! ``` sh
 //! git clone https://github.com/bitslab/cargo-compiler-interrupts
@@ -32,21 +33,21 @@
 //!
 //! ## Getting started
 //!
-//! `cargo-compiler-interrupts` provides three subcommands:
+//! `cargo-compiler-interrupts` provides three binaries:
 //!
 //! ``` sh
-//! cargo lib-ci --install    # install the CI library
-//! cargo build-ci            # build and integrate CI to the binary
-//! cargo run-ci              # run the CI-integrated binary
+//! cargo-lib-ci install    # install the CI library
+//! cargo-build-ci          # build and integrate CI to the binary
+//! cargo-run-ci            # run the CI-integrated binary
 //! ```
 //!
-//! * `cargo lib-ci` — manage the Compiler Interrupts library.
-//! * `cargo build-ci` — build and integrate the Compiler Interrupts to the package.
-//! * `cargo run-ci` — run the integrated binary.
+//! * `cargo-lib-ci` — manage the Compiler Interrupts library.
+//! * `cargo-build-ci` — build and integrate the Compiler Interrupts to the package.
+//! * `cargo-run-ci` — run the integrated binary.
 //! You can specify which binary to run by passing `--bin <BINARY>`.
 //!
-//! Run `cargo lib-ci --install` to install the Compiler Interrupts library first.
-//! Before running `cargo build-ci`, add the Compiler Interrupts API package as the dependency for
+//! Run `cargo-lib-ci install` to install the Compiler Interrupts library first.
+//! Before running `cargo-build-ci`, add the Compiler Interrupts API package as the dependency for
 //! your Cargo package and registers the Compiler Interrupts handler in your program.
 //! Compiler Interrupts API is provided through the [`compiler-interrupts`][compiler-interrupts-rs]
 //! package.
@@ -93,7 +94,7 @@
 //! [compiler-interrupts-paper]: https://dl.acm.org/doi/10.1145/3453483.3454107
 //! [rust]: https://www.rust-lang.org/tools/install
 //! [llvm]: https://releases.llvm.org
-//! [quanshousio]: https://quanshousio.com
+//! [quanshousio]: https://www.quanshousio.com
 //! [jakob]: https://www.linkedin.com/in/erikssonjakob
 //! [nilanjana]: https://www.linkedin.com/in/nilanjana-basu-99027959
 
@@ -121,10 +122,22 @@
 )]
 
 /// Compiler Interrupts result.
-pub type CIResult<T> = anyhow::Result<T>;
+type CIResult<T> = anyhow::Result<T>;
 
-pub mod config;
-pub mod error;
+mod args;
+mod cargo;
+mod config;
+mod error;
+mod llvm;
 pub mod ops;
-pub mod opts;
-pub mod util;
+mod paths;
+mod util;
+
+/// Name of the cargo-build-ci.
+const BUILD_CI_BIN_NAME: &str = "cargo-build-ci";
+
+/// Name of the cargo-run-ci.
+const RUN_CI_BIN_NAME: &str = "cargo-run-ci";
+
+/// Name of the cargo-lib-ci.
+const LIB_CI_BIN_NAME: &str = "cargo-lib-ci";

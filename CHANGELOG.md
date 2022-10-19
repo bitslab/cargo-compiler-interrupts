@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file. `cargo-comp
 
 #### 3.x Releases
 
+- `4.0.x` Releases - [4.0.0](#400)
 - `3.2.x` Releases - [3.2.0](#320) | [3.2.1](#321)
 - `3.1.x` Releases - [3.1.0](#310)
 - `3.0.x` Releases - [3.0.0](#300) | [3.0.1](#301)
@@ -16,6 +17,32 @@ All notable changes to this project will be documented in this file. `cargo-comp
 #### 1.x Releases
 
 - `1.0.x` Releases - [1.0.0](#100)
+
+---
+
+## [4.0.0](https://github.com/bitslab/cargo-compiler-interrupts/releases/tag/4.0.0)
+
+Released on 2022-10-18.
+
+#### Added
+
+- Add `Cargo.lock` to lock dependency version.
+- Major code refactoring:
+  - New subcommands and options. Please check `--help` for further usage.
+  - New `cargo` module contains `cargo`-related functions.
+  - New `paths` module contains functions for manipulating `Path` and `PathBuf`.
+  - New `llvm` module is reimplemented from `util:toolchain`.
+  - New `args` module updated with clap 4.0, replaced the old `opts` module.
+  - Better logging and error messages.
+
+#### Updated
+
+- Use Rust 2021.
+- Major dependency updates such as clap 4.0, indicatif 0.17, and other dependencies.
+
+#### Removed
+
+- Local `cargo-util` package is replaced by using the one from upstream.
 
 ---
 

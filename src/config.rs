@@ -1,22 +1,25 @@
 //! Handles configuration for the Compiler Interrupts library.
 
+use anyhow::Context;
 use cargo_util::paths;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
+use std::path::PathBuf;
+use tracing::{debug, warn};
 
-use crate::{util, CIResult};
+use crate::paths::PathExt;
+use crate::CIResult;
 
 /// Configuration for the Compiler Interrupts library.
 #[derive(Serialize, Deserialize, Default, Debug)]
 pub struct Config {
     /// Path to the library.
-    pub library_path: String,
+    pub library_path: PathBuf,
     /// Path to the debug-enabled library.
-    pub library_path_dbg: String,
+    pub library_debug_path: PathBuf,
+    /// Arguments for the library.
+    pub library_args: Vec<String>,
     /// LLVM version used to compile the library.
     pub llvm_version: String,
-    /// Default arguments.
-    pub default_args: Vec<String>,
     /// Checksum of the source code.
     pub checksum: String,
     /// Remote URL for the source code.
@@ -24,39 +27,51 @@ pub struct Config {
 }
 
 impl Config {
-    /// Load the configuration.
+    /// Loads the configuration.
     pub fn load() -> CIResult<Self> {
-        let mut path = util::config_path()?;
+        let default = Self::default();
+        let mut path = Config::dir()?;
         path.push("default.cfg");
         let file = match paths::read(&path) {
             Ok(file) => file,
-            Err(e) => {
-                info!("config file not available, default config loaded");
-                debug!("error: {}", e);
-                return Ok(Self::default());
+            Err(error) => {
+                Self::save(&default).context("failed to save default config")?;
+
+                warn!("config file not found, use default config");
+                debug!(?error);
+
+                return Ok(default);
             }
         };
         match toml::from_str(&file) {
-            Ok(cfg) => Ok(cfg),
-            Err(e) => {
-                let old_path = util::append_suffix(&path, "old");
-                paths::copy(&path, &old_path)?;
-                Self::save(&Self::default())?;
+            Ok(config) => Ok(config),
+            Err(error) => {
+                let old_path = path.append_suffix("old")?;
+                paths::copy(&path, &old_path).context("failed to backup the old config")?;
+                Self::save(&default)?;
 
-                eprintln!("Incompatible config file found, replaced with default config");
-                eprintln!("Old config file can be found at: {}", old_path.display());
-                debug!("error: {}", e);
+                warn!("found incompatible config file, replaced with default config");
+                warn!("old config file can be found at: {}", old_path.display());
+                debug!(?error);
 
                 Self::load()
             }
         }
     }
 
-    /// Save the configuration.
+    /// Saves the configuration.
     pub fn save(config: &Self) -> CIResult<()> {
-        let mut path = util::config_path()?;
+        let mut path = Config::dir()?;
         path.push("default.cfg");
-        let s = toml::to_string_pretty(config)?;
-        paths::write(path, s)
+        let s = toml::to_string_pretty(config).context("failed to parse the config")?;
+        paths::write(path, s).context("failed to save the config")
+    }
+
+    /// Gets the configuration directory.
+    pub fn dir() -> CIResult<PathBuf> {
+        let mut path = dirs::config_dir().context("failed to get the config directory")?;
+        path.push("cargo-compiler-interrupts");
+        paths::create_dir_all(&path)?;
+        Ok(path)
     }
 }
