@@ -277,7 +277,7 @@ fn progress_bar(rx: Receiver<IntegrationContext>, len: u64, log_level: &String) 
                 }
                 pb.inc(1);
             }
-            Error(message) => {
+            Error(_) => {
                 pb.finish_and_clear();
                 println!(
                     "{:>12} Compiler Interrupts integration has unexpectedly failed",

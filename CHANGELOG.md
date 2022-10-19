@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file. `cargo-comp
 
 #### 3.x Releases
 
-- `4.0.x` Releases - [4.0.0](#400)
+- `4.0.x` Releases - [4.0.0](#400) | [4.0.1](#401)
 - `3.2.x` Releases - [3.2.0](#320) | [3.2.1](#321)
 - `3.1.x` Releases - [3.1.0](#310)
 - `3.0.x` Releases - [3.0.0](#300) | [3.0.1](#301)
@@ -20,13 +20,18 @@ All notable changes to this project will be documented in this file. `cargo-comp
 
 ---
 
-## [4.0.0](https://github.com/bitslab/cargo-compiler-interrupts/releases/tag/4.0.0)
+## [4.0.1](https://github.com/bitslab/cargo-compiler-interrupts/releases/tag/4.0.0)
 
-Released on 2022-10-18.
+Released on 2022-10-19.
 
 #### Added
 
 - Add `Cargo.lock` to lock dependency version.
+
+## [4.0.0](https://github.com/bitslab/cargo-compiler-interrupts/releases/tag/4.0.0)
+
+#### Added
+
 - Major code refactoring:
   - New subcommands and options. Please check `--help` for further usage.
   - New `cargo` module contains `cargo`-related functions.
